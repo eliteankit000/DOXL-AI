@@ -1,64 +1,16 @@
 import { NextResponse } from 'next/server';
-import { MongoClient } from 'mongodb';
-import { v4 as uuidv4 } from 'uuid';
-import { writeFile, unlink, readFile, mkdir, access } from 'fs/promises';
+import { getSupabaseAdmin, getAuthUser, getUserProfile } from '@/lib/supabase-server';
+import { writeFile, unlink, mkdir, access } from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 
 const execAsync = promisify(exec);
-const JWT_SECRET = process.env.JWT_SECRET || 'docxl-ai-secret-key-2025';
-const UPLOAD_DIR = '/tmp/uploads';
+const TEMP_DIR = '/tmp/docxl_processing';
 
-// MongoDB connection
-let client = null;
-let db = null;
-
-async function getDb() {
-  if (!db) {
-    client = new MongoClient(process.env.MONGO_URL);
-    await client.connect();
-    db = client.db(process.env.DB_NAME);
-  }
-  return db;
-}
-
-// Ensure upload directory exists
-async function ensureUploadDir() {
-  try {
-    await access(UPLOAD_DIR);
-  } catch {
-    await mkdir(UPLOAD_DIR, { recursive: true });
-  }
-}
-
-// Auth middleware
-function getTokenFromRequest(request) {
-  const authHeader = request.headers.get('authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.substring(7);
-  }
-  return null;
-}
-
-function verifyToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch {
-    return null;
-  }
-}
-
-async function getAuthUser(request) {
-  const token = getTokenFromRequest(request);
-  if (!token) return null;
-  const decoded = verifyToken(token);
-  if (!decoded) return null;
-  const database = await getDb();
-  const user = await database.collection('users').findOne({ id: decoded.userId });
-  return user;
+// Ensure temp directory exists
+async function ensureTempDir() {
+  try { await access(TEMP_DIR); } catch { await mkdir(TEMP_DIR, { recursive: true }); }
 }
 
 // CORS headers
@@ -70,37 +22,59 @@ function corsHeaders() {
   };
 }
 
-// === AUTH HANDLERS ===
+function jsonResponse(body, status = 200) {
+  return NextResponse.json(body, { status, headers: corsHeaders() });
+}
+
+// =============================================
+// AUTH HANDLERS (Supabase Auth - no more JWT/bcrypt)
+// =============================================
+
 async function handleRegister(request) {
   try {
     const body = await request.json();
     const { email, password, name } = body;
-    if (!email || !password) {
-      return NextResponse.json({ error: 'Email and password required' }, { status: 400, headers: corsHeaders() });
-    }
-    const database = await getDb();
-    const existing = await database.collection('users').findOne({ email: email.toLowerCase() });
-    if (existing) {
-      return NextResponse.json({ error: 'Email already registered' }, { status: 409, headers: corsHeaders() });
-    }
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = {
-      id: uuidv4(),
+    if (!email || !password) return jsonResponse({ error: 'Email and password required' }, 400);
+
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase.auth.admin.createUser({
       email: email.toLowerCase(),
-      name: name || email.split('@')[0],
-      password: hashedPassword,
-      plan: 'free',
-      credits_remaining: 5,
-      country: 'unknown',
-      created_at: new Date().toISOString(),
-    };
-    await database.collection('users').insertOne(user);
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-    const { password: _, ...userWithoutPassword } = user;
-    return NextResponse.json({ token, user: userWithoutPassword }, { status: 201, headers: corsHeaders() });
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: name || email.split('@')[0] },
+    });
+
+    if (error) {
+      if (error.message?.includes('already been registered') || error.message?.includes('already exists')) {
+        return jsonResponse({ error: 'Email already registered' }, 409);
+      }
+      return jsonResponse({ error: error.message }, 400);
+    }
+
+    // Generate a session token for the new user
+    const { data: signInData, error: signInError } = await supabase.auth.admin.generateLink({
+      type: 'magiclink',
+      email: email.toLowerCase(),
+    });
+
+    // Sign in the user to get a session
+    // We use admin.createUser with email_confirm:true so the user can sign in immediately
+    // The frontend will sign in right after register
+    const profile = await getUserProfile(data.user.id);
+
+    return jsonResponse({
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        name: name || email.split('@')[0],
+        plan: profile?.plan || 'free',
+        credits_remaining: profile?.credits ?? 5,
+      },
+      message: 'Account created. Please sign in.',
+    }, 201);
   } catch (error) {
     console.error('Register error:', error);
-    return NextResponse.json({ error: 'Registration failed' }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Registration failed' }, 500);
   }
 }
 
@@ -108,140 +82,225 @@ async function handleLogin(request) {
   try {
     const body = await request.json();
     const { email, password } = body;
-    if (!email || !password) {
-      return NextResponse.json({ error: 'Email and password required' }, { status: 400, headers: corsHeaders() });
+    if (!email || !password) return jsonResponse({ error: 'Email and password required' }, 400);
+
+    const supabase = getSupabaseAdmin();
+
+    // Use the anon client approach: create a temporary client to sign in
+    const { createClient } = await import('@supabase/supabase-js');
+    const anonClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    );
+
+    const { data, error } = await anonClient.auth.signInWithPassword({
+      email: email.toLowerCase(),
+      password,
+    });
+
+    if (error) {
+      return jsonResponse({ error: 'Invalid credentials' }, 401);
     }
-    const database = await getDb();
-    const user = await database.collection('users').findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401, headers: corsHeaders() });
-    }
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401, headers: corsHeaders() });
-    }
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-    const { password: _, ...userWithoutPassword } = user;
-    return NextResponse.json({ token, user: userWithoutPassword }, { status: 200, headers: corsHeaders() });
+
+    const profile = await getUserProfile(data.user.id);
+
+    return jsonResponse({
+      token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        name: profile?.full_name || data.user.user_metadata?.full_name || data.user.email,
+        plan: profile?.plan || 'free',
+        credits_remaining: profile?.credits ?? 5,
+      },
+    });
   } catch (error) {
     console.error('Login error:', error);
-    return NextResponse.json({ error: 'Login failed' }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Login failed' }, 500);
   }
 }
 
 async function handleGetMe(request) {
   const user = await getAuthUser(request);
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
-  }
-  const { password: _, ...userWithoutPassword } = user;
-  return NextResponse.json({ user: userWithoutPassword }, { headers: corsHeaders() });
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+  const profile = await getUserProfile(user.id);
+  if (!profile) return jsonResponse({ error: 'Profile not found' }, 404);
+
+  return jsonResponse({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: profile.full_name || user.user_metadata?.full_name || user.email,
+      plan: profile.plan,
+      credits_remaining: profile.credits,
+      created_at: profile.created_at,
+    },
+  });
 }
 
-// === UPLOAD HANDLER ===
+// =============================================
+// FILE UPLOAD (Supabase Storage)
+// =============================================
+
 async function handleUpload(request) {
   try {
     const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+    const profile = await getUserProfile(user.id);
+    if (!profile || profile.credits <= 0) {
+      return jsonResponse({ error: 'No credits remaining. Please upgrade to Pro.' }, 403);
     }
-    if (user.credits_remaining <= 0) {
-      return NextResponse.json({ error: 'No credits remaining. Please upgrade to Pro.' }, { status: 403, headers: corsHeaders() });
-    }
-    await ensureUploadDir();
+
     const formData = await request.formData();
     const file = formData.get('file');
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400, headers: corsHeaders() });
-    }
-    const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!file) return jsonResponse({ error: 'No file provided' }, 400);
+
     const ext = path.extname(file.name).toLowerCase();
     const validExts = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
     if (!validExts.includes(ext)) {
-      return NextResponse.json({ error: 'Invalid file type. Supported: PDF, JPG, PNG, WEBP' }, { status: 400, headers: corsHeaders() });
+      return jsonResponse({ error: 'Invalid file type. Supported: PDF, JPG, PNG, WEBP' }, 400);
     }
-    const maxSize = 10 * 1024 * 1024; // 10MB
+
+    const maxSize = 10 * 1024 * 1024;
     if (file.size > maxSize) {
-      return NextResponse.json({ error: 'File too large. Maximum 10MB allowed.' }, { status: 400, headers: corsHeaders() });
+      return jsonResponse({ error: 'File too large. Maximum 10MB allowed.' }, 400);
     }
+
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    const fileName = `${user.id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const userDir = path.join(UPLOAD_DIR, user.id);
-    await mkdir(userDir, { recursive: true });
-    const filePath = path.join(UPLOAD_DIR, fileName);
-    await writeFile(filePath, buffer);
+    const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `${user.id}/${Date.now()}_${sanitized}`;
+
+    const supabase = getSupabaseAdmin();
+
+    // Upload to Supabase Storage
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from('uploads')
+      .upload(storagePath, buffer, {
+        contentType: file.type || 'application/octet-stream',
+        upsert: false,
+      });
+
+    if (storageError) {
+      console.error('Storage upload error:', storageError);
+      return jsonResponse({ error: 'File upload failed: ' + storageError.message }, 500);
+    }
+
+    // Determine file type
     let fileType = 'other';
     if (ext === '.pdf') fileType = 'invoice';
     else fileType = 'image';
-    const upload = {
-      id: uuidv4(),
-      user_id: user.id,
-      file_name: file.name,
-      file_path: filePath,
-      file_size: file.size,
-      file_type: fileType,
-      mime_type: file.type || 'application/octet-stream',
-      status: 'uploaded',
-      error_message: null,
-      created_at: new Date().toISOString(),
-    };
-    const database = await getDb();
-    await database.collection('uploads').insertOne(upload);
-    return NextResponse.json({ upload: { id: upload.id, file_name: upload.file_name, status: upload.status, file_type: upload.file_type, created_at: upload.created_at } }, { status: 201, headers: corsHeaders() });
+
+    // Insert upload record
+    const { data: uploadRecord, error: dbError } = await supabase
+      .from('uploads')
+      .insert({
+        user_id: user.id,
+        file_name: file.name,
+        file_path: storagePath,
+        file_size: file.size,
+        file_type: fileType,
+        mime_type: file.type || 'application/octet-stream',
+        status: 'uploaded',
+      })
+      .select()
+      .single();
+
+    if (dbError) {
+      console.error('DB insert error:', dbError);
+      // Cleanup storage
+      await supabase.storage.from('uploads').remove([storagePath]);
+      return jsonResponse({ error: 'Failed to create upload record' }, 500);
+    }
+
+    return jsonResponse({
+      upload: {
+        id: uploadRecord.id,
+        file_name: uploadRecord.file_name,
+        status: uploadRecord.status,
+        file_type: uploadRecord.file_type,
+        created_at: uploadRecord.created_at,
+      },
+    }, 201);
   } catch (error) {
     console.error('Upload error:', error);
-    return NextResponse.json({ error: 'Upload failed: ' + error.message }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Upload failed: ' + error.message }, 500);
   }
 }
 
-// === PROCESS HANDLER ===
+// =============================================
+// AI PROCESSING
+// =============================================
+
 async function handleProcess(request) {
   try {
     const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
-    }
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
     const body = await request.json();
     const { upload_id } = body;
-    if (!upload_id) {
-      return NextResponse.json({ error: 'upload_id required' }, { status: 400, headers: corsHeaders() });
-    }
-    const database = await getDb();
-    const upload = await database.collection('uploads').findOne({ id: upload_id, user_id: user.id });
-    if (!upload) {
-      return NextResponse.json({ error: 'Upload not found' }, { status: 404, headers: corsHeaders() });
-    }
-    if (upload.status === 'processing') {
-      return NextResponse.json({ error: 'Already processing' }, { status: 400, headers: corsHeaders() });
-    }
+    if (!upload_id) return jsonResponse({ error: 'upload_id required' }, 400);
+
+    const supabase = getSupabaseAdmin();
+
+    // Fetch upload record
+    const { data: upload, error: fetchErr } = await supabase
+      .from('uploads')
+      .select('*')
+      .eq('id', upload_id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (fetchErr || !upload) return jsonResponse({ error: 'Upload not found' }, 404);
+    if (upload.status === 'processing') return jsonResponse({ error: 'Already processing' }, 400);
+
     // Set status to processing
-    await database.collection('uploads').updateOne({ id: upload_id }, { $set: { status: 'processing' } });
-    // Call Python extraction script
+    await supabase.from('uploads').update({ status: 'processing' }).eq('id', upload_id);
+
     try {
+      // Download file from Supabase Storage to temp
+      const { data: fileBlob, error: dlErr } = await supabase.storage
+        .from('uploads')
+        .download(upload.file_path);
+
+      if (dlErr || !fileBlob) {
+        throw new Error('Failed to download file from storage: ' + (dlErr?.message || 'unknown'));
+      }
+
+      await ensureTempDir();
+      const tempFilePath = path.join(TEMP_DIR, `${upload_id}${path.extname(upload.file_name)}`);
+      const fileBuffer = Buffer.from(await fileBlob.arrayBuffer());
+      await writeFile(tempFilePath, fileBuffer);
+
+      // Call Python extraction script
       const { stdout, stderr } = await execAsync(
-        `cd /app && EMERGENT_LLM_KEY="${process.env.EMERGENT_LLM_KEY}" /root/.venv/bin/python3 scripts/extract.py "${upload.file_path}"`,
+        `cd /app && EMERGENT_LLM_KEY="${process.env.EMERGENT_LLM_KEY}" /root/.venv/bin/python3 scripts/extract.py "${tempFilePath}"`,
         { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }
       );
-      if (stderr) {
-        console.error('Extract stderr:', stderr);
-      }
+
+      // Cleanup temp file
+      try { await unlink(tempFilePath); } catch (e) { /* ignore */ }
+
+      if (stderr) console.error('Extract stderr:', stderr);
+
       let result;
       try {
         result = JSON.parse(stdout.trim());
       } catch (parseError) {
-        throw new Error('Failed to parse extraction result: ' + stdout.substring(0, 200));
+        throw new Error('Failed to parse extraction result');
       }
+
       if (result.error) {
-        await database.collection('uploads').updateOne(
-          { id: upload_id },
-          { $set: { status: 'failed', error_message: result.error } }
-        );
-        return NextResponse.json({ error: result.error }, { status: 422, headers: corsHeaders() });
+        await supabase.from('uploads').update({ status: 'failed', error_message: result.error }).eq('id', upload_id);
+        return jsonResponse({ error: result.error }, 422);
       }
-      // Normalize the result
+
+      // Normalize rows
       const normalizedRows = (result.rows || []).map((row, index) => ({
-        id: uuidv4(),
         row_number: index + 1,
         date: row.date || '',
         description: row.description || '',
@@ -251,169 +310,270 @@ async function handleProcess(request) {
         gst: parseFloat(row.gst) || 0,
         reference: row.reference || '',
       }));
-      const extractedData = {
-        id: uuidv4(),
-        upload_id: upload_id,
-        document_type: result.document_type || 'other',
-        structured_json: { rows: normalizedRows },
-        summary: result.summary || { total_rows: normalizedRows.length, total_amount: normalizedRows.reduce((sum, r) => sum + r.amount, 0) },
-        confidence_score: 0.85,
-        created_at: new Date().toISOString(),
+
+      const summary = result.summary || {
+        total_rows: normalizedRows.length,
+        total_amount: normalizedRows.reduce((sum, r) => sum + r.amount, 0),
       };
-      await database.collection('extracted_data').insertOne(extractedData);
-      await database.collection('uploads').updateOne(
-        { id: upload_id },
-        { $set: { status: 'completed' } }
-      );
+
+      // Insert result record
+      const { data: resultRecord, error: resultErr } = await supabase
+        .from('results')
+        .insert({
+          upload_id,
+          document_type: result.document_type || 'other',
+          structured_json: { rows: normalizedRows },
+          summary,
+          confidence_score: 0.85,
+        })
+        .select()
+        .single();
+
+      if (resultErr) {
+        console.error('Result insert error:', resultErr);
+        throw new Error('Failed to save extraction result');
+      }
+
+      // Update upload status
+      await supabase.from('uploads').update({ status: 'completed' }).eq('id', upload_id);
+
       // Deduct credit
-      await database.collection('users').updateOne(
-        { id: user.id },
-        { $inc: { credits_remaining: -1 } }
-      );
-      return NextResponse.json({
+      const profile = await getUserProfile(user.id);
+      if (profile) {
+        await supabase
+          .from('profiles')
+          .update({ credits: Math.max(0, profile.credits - 1) })
+          .eq('id', user.id);
+      }
+
+      // Log usage
+      await supabase.from('usage_logs').insert({
+        user_id: user.id,
+        action: 'process',
+        credits_used: 1,
+        upload_id,
+      });
+
+      return jsonResponse({
         result: {
-          id: extractedData.id,
-          upload_id: upload_id,
-          document_type: extractedData.document_type,
+          id: resultRecord.id,
+          upload_id,
+          document_type: resultRecord.document_type,
           rows: normalizedRows,
-          summary: extractedData.summary,
-          confidence_score: extractedData.confidence_score,
-        }
-      }, { headers: corsHeaders() });
+          summary,
+          confidence_score: resultRecord.confidence_score,
+        },
+      });
     } catch (execError) {
       console.error('Extraction error:', execError);
-      await database.collection('uploads').updateOne(
-        { id: upload_id },
-        { $set: { status: 'failed', error_message: execError.message } }
-      );
-      return NextResponse.json({ error: 'AI extraction failed: ' + execError.message }, { status: 500, headers: corsHeaders() });
+      await supabase.from('uploads').update({
+        status: 'failed',
+        error_message: execError.message,
+      }).eq('id', upload_id);
+      return jsonResponse({ error: 'AI extraction failed: ' + execError.message }, 500);
     }
   } catch (error) {
     console.error('Process error:', error);
-    return NextResponse.json({ error: 'Processing failed' }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Processing failed' }, 500);
   }
 }
 
-// === RESULT HANDLER ===
+// =============================================
+// GET RESULT
+// =============================================
+
 async function handleGetResult(request, id) {
   try {
     const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+    const supabase = getSupabaseAdmin();
+
+    // Try by result id first, then by upload_id
+    let { data: resultData } = await supabase
+      .from('results')
+      .select('*, uploads!inner(user_id, file_name)')
+      .eq('id', id)
+      .single();
+
+    if (!resultData) {
+      const { data } = await supabase
+        .from('results')
+        .select('*, uploads!inner(user_id, file_name)')
+        .eq('upload_id', id)
+        .single();
+      resultData = data;
     }
-    const database = await getDb();
-    // Try by extracted_data id first
-    let extractedData = await database.collection('extracted_data').findOne({ id: id });
-    if (!extractedData) {
-      // Try by upload_id
-      extractedData = await database.collection('extracted_data').findOne({ upload_id: id });
-    }
-    if (!extractedData) {
-      return NextResponse.json({ error: 'Result not found' }, { status: 404, headers: corsHeaders() });
-    }
-    // Verify ownership
-    const upload = await database.collection('uploads').findOne({ id: extractedData.upload_id, user_id: user.id });
-    if (!upload) {
-      return NextResponse.json({ error: 'Not authorized to view this result' }, { status: 403, headers: corsHeaders() });
-    }
-    return NextResponse.json({
+
+    if (!resultData) return jsonResponse({ error: 'Result not found' }, 404);
+    if (resultData.uploads.user_id !== user.id) return jsonResponse({ error: 'Not authorized' }, 403);
+
+    const rows = resultData.edited_json?.rows || resultData.structured_json?.rows || [];
+
+    return jsonResponse({
       result: {
-        id: extractedData.id,
-        upload_id: extractedData.upload_id,
-        document_type: extractedData.document_type,
-        rows: extractedData.structured_json?.rows || [],
-        summary: extractedData.summary,
-        confidence_score: extractedData.confidence_score,
-        file_name: upload.file_name,
-        created_at: extractedData.created_at,
-      }
-    }, { headers: corsHeaders() });
+        id: resultData.id,
+        upload_id: resultData.upload_id,
+        document_type: resultData.document_type,
+        rows,
+        summary: resultData.summary,
+        confidence_score: resultData.confidence_score,
+        file_name: resultData.uploads.file_name,
+        created_at: resultData.created_at,
+      },
+    });
   } catch (error) {
     console.error('Get result error:', error);
-    return NextResponse.json({ error: 'Failed to get result' }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Failed to get result' }, 500);
   }
 }
 
-// === UPLOADS LIST HANDLER ===
+// =============================================
+// LIST UPLOADS
+// =============================================
+
 async function handleGetUploads(request) {
   try {
     const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
-    }
-    const database = await getDb();
-    const uploads = await database.collection('uploads')
-      .find({ user_id: user.id })
-      .sort({ created_at: -1 })
-      .limit(50)
-      .toArray();
-    const uploadsClean = uploads.map(u => ({
-      id: u.id,
-      file_name: u.file_name,
-      file_type: u.file_type,
-      status: u.status,
-      error_message: u.error_message,
-      created_at: u.created_at,
-    }));
-    return NextResponse.json({ uploads: uploadsClean }, { headers: corsHeaders() });
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+    const supabase = getSupabaseAdmin();
+    const { data: uploads, error } = await supabase
+      .from('uploads')
+      .select('id, file_name, file_type, status, error_message, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) return jsonResponse({ error: 'Failed to fetch uploads' }, 500);
+
+    return jsonResponse({ uploads: uploads || [] });
   } catch (error) {
     console.error('Get uploads error:', error);
-    return NextResponse.json({ error: 'Failed to get uploads' }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Failed to get uploads' }, 500);
   }
 }
 
-// === DELETE FILE HANDLER ===
+// =============================================
+// DELETE FILE
+// =============================================
+
 async function handleDeleteFile(request, id) {
   try {
     const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+    const supabase = getSupabaseAdmin();
+
+    const { data: upload } = await supabase
+      .from('uploads')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (!upload) return jsonResponse({ error: 'File not found' }, 404);
+
+    // Delete from Supabase Storage
+    if (upload.file_path) {
+      await supabase.storage.from('uploads').remove([upload.file_path]);
     }
-    const database = await getDb();
-    const upload = await database.collection('uploads').findOne({ id: id, user_id: user.id });
-    if (!upload) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404, headers: corsHeaders() });
-    }
-    // Delete physical file
-    try {
-      await unlink(upload.file_path);
-    } catch (e) {
-      console.error('File delete error:', e);
-    }
-    // Delete from DB
-    await database.collection('uploads').deleteOne({ id: id });
-    await database.collection('extracted_data').deleteMany({ upload_id: id });
-    return NextResponse.json({ message: 'File deleted' }, { headers: corsHeaders() });
+
+    // Delete results
+    await supabase.from('results').delete().eq('upload_id', id);
+
+    // Delete upload record
+    await supabase.from('uploads').delete().eq('id', id);
+
+    return jsonResponse({ message: 'File deleted' });
   } catch (error) {
     console.error('Delete file error:', error);
-    return NextResponse.json({ error: 'Delete failed' }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Delete failed' }, 500);
   }
 }
 
-// === EXPORT EXCEL HANDLER ===
+// =============================================
+// UPDATE RESULT (edited rows)
+// =============================================
+
+async function handleUpdateResult(request, id) {
+  try {
+    const user = await getAuthUser(request);
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+    const body = await request.json();
+    const { rows } = body;
+    if (!rows) return jsonResponse({ error: 'rows required' }, 400);
+
+    const supabase = getSupabaseAdmin();
+
+    // Find result and verify ownership
+    let { data: resultData } = await supabase
+      .from('results')
+      .select('*, uploads!inner(user_id)')
+      .eq('id', id)
+      .single();
+
+    if (!resultData) {
+      const { data } = await supabase
+        .from('results')
+        .select('*, uploads!inner(user_id)')
+        .eq('upload_id', id)
+        .single();
+      resultData = data;
+    }
+
+    if (!resultData) return jsonResponse({ error: 'Result not found' }, 404);
+    if (resultData.uploads.user_id !== user.id) return jsonResponse({ error: 'Not authorized' }, 403);
+
+    await supabase
+      .from('results')
+      .update({
+        edited_json: { rows },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', resultData.id);
+
+    return jsonResponse({ message: 'Updated successfully' });
+  } catch (error) {
+    console.error('Update result error:', error);
+    return jsonResponse({ error: 'Update failed' }, 500);
+  }
+}
+
+// =============================================
+// EXPORT EXCEL
+// =============================================
+
 async function handleExportExcel(request, id) {
   try {
     const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+    const supabase = getSupabaseAdmin();
+
+    let { data: resultData } = await supabase
+      .from('results')
+      .select('*, uploads!inner(user_id, file_name)')
+      .eq('id', id)
+      .single();
+
+    if (!resultData) {
+      const { data } = await supabase
+        .from('results')
+        .select('*, uploads!inner(user_id, file_name)')
+        .eq('upload_id', id)
+        .single();
+      resultData = data;
     }
-    const database = await getDb();
-    let extractedData = await database.collection('extracted_data').findOne({ id: id });
-    if (!extractedData) {
-      extractedData = await database.collection('extracted_data').findOne({ upload_id: id });
-    }
-    if (!extractedData) {
-      return NextResponse.json({ error: 'Result not found' }, { status: 404, headers: corsHeaders() });
-    }
-    // Verify ownership
-    const upload = await database.collection('uploads').findOne({ id: extractedData.upload_id, user_id: user.id });
-    if (!upload) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 403, headers: corsHeaders() });
-    }
+
+    if (!resultData) return jsonResponse({ error: 'Result not found' }, 404);
+    if (resultData.uploads.user_id !== user.id) return jsonResponse({ error: 'Not authorized' }, 403);
+
     const ExcelJS = (await import('exceljs')).default;
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Extracted Data');
-    // Define columns
+
     worksheet.columns = [
       { header: '#', key: 'row_number', width: 6 },
       { header: 'Date', key: 'date', width: 15 },
@@ -424,11 +584,11 @@ async function handleExportExcel(request, id) {
       { header: 'GST', key: 'gst', width: 12 },
       { header: 'Reference', key: 'reference', width: 20 },
     ];
-    // Style header
+
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
-    // Add data
-    const rows = extractedData.structured_json?.rows || [];
+
+    const rows = resultData.edited_json?.rows || resultData.structured_json?.rows || [];
     rows.forEach((row, index) => {
       worksheet.addRow({
         row_number: index + 1,
@@ -441,8 +601,8 @@ async function handleExportExcel(request, id) {
         reference: row.reference || '',
       });
     });
-    // Add summary row
-    const lastRow = worksheet.addRow({});
+
+    worksheet.addRow({});
     const summaryRow = worksheet.addRow({
       row_number: '',
       date: '',
@@ -454,78 +614,49 @@ async function handleExportExcel(request, id) {
       reference: '',
     });
     summaryRow.font = { bold: true };
-    // Generate buffer
-    const buffer = await workbook.xlsx.writeBuffer();
-    const headers = {
-      ...corsHeaders(),
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="docxl_export_${Date.now()}.xlsx"`,
-    };
-    return new NextResponse(buffer, { status: 200, headers });
+
+    // Log export usage
+    await supabase.from('usage_logs').insert({
+      user_id: user.id,
+      action: 'export',
+      credits_used: 0,
+      upload_id: resultData.upload_id,
+    });
+
+    const excelBuffer = await workbook.xlsx.writeBuffer();
+
+    return new NextResponse(excelBuffer, {
+      status: 200,
+      headers: {
+        ...corsHeaders(),
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="docxl_export_${Date.now()}.xlsx"`,
+      },
+    });
   } catch (error) {
     console.error('Export error:', error);
-    return NextResponse.json({ error: 'Export failed: ' + error.message }, { status: 500, headers: corsHeaders() });
+    return jsonResponse({ error: 'Export failed: ' + error.message }, 500);
   }
 }
 
-// === UPDATE RESULT HANDLER ===
-async function handleUpdateResult(request, id) {
-  try {
-    const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders() });
-    }
-    const body = await request.json();
-    const { rows } = body;
-    if (!rows) {
-      return NextResponse.json({ error: 'rows required' }, { status: 400, headers: corsHeaders() });
-    }
-    const database = await getDb();
-    let extractedData = await database.collection('extracted_data').findOne({ id: id });
-    if (!extractedData) {
-      extractedData = await database.collection('extracted_data').findOne({ upload_id: id });
-    }
-    if (!extractedData) {
-      return NextResponse.json({ error: 'Result not found' }, { status: 404, headers: corsHeaders() });
-    }
-    // Verify ownership
-    const upload = await database.collection('uploads').findOne({ id: extractedData.upload_id, user_id: user.id });
-    if (!upload) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 403, headers: corsHeaders() });
-    }
-    await database.collection('extracted_data').updateOne(
-      { id: extractedData.id },
-      { $set: { 'structured_json.rows': rows, updated_at: new Date().toISOString() } }
-    );
-    return NextResponse.json({ message: 'Updated successfully' }, { headers: corsHeaders() });
-  } catch (error) {
-    console.error('Update result error:', error);
-    return NextResponse.json({ error: 'Update failed' }, { status: 500, headers: corsHeaders() });
-  }
-}
+// =============================================
+// ROUTE HANDLERS
+// =============================================
 
-// === ROUTE HANDLERS ===
 export async function GET(request, context) {
   const params = context?.params || {};
   const pathSegments = params.path || [];
   const routePath = pathSegments.join('/');
 
   if (routePath === '' || routePath === 'health') {
-    return NextResponse.json({ status: 'ok', service: 'DocXL AI API' }, { headers: corsHeaders() });
+    return jsonResponse({ status: 'ok', service: 'DocXL AI API', backend: 'supabase' });
   }
-  if (routePath === 'auth/me') {
-    return handleGetMe(request);
-  }
-  if (routePath === 'uploads') {
-    return handleGetUploads(request);
-  }
-  if (routePath.startsWith('result/')) {
-    return handleGetResult(request, pathSegments[1]);
-  }
-  if (routePath.startsWith('export/excel/')) {
-    return handleExportExcel(request, pathSegments[2]);
-  }
-  return NextResponse.json({ error: 'Not found' }, { status: 404, headers: corsHeaders() });
+  if (routePath === 'auth/me') return handleGetMe(request);
+  if (routePath === 'uploads') return handleGetUploads(request);
+  if (routePath.startsWith('result/')) return handleGetResult(request, pathSegments[1]);
+  if (routePath.startsWith('export/excel/')) return handleExportExcel(request, pathSegments[2]);
+
+  return jsonResponse({ error: 'Not found' }, 404);
 }
 
 export async function POST(request, context) {
@@ -533,19 +664,12 @@ export async function POST(request, context) {
   const pathSegments = params.path || [];
   const routePath = pathSegments.join('/');
 
-  if (routePath === 'auth/register') {
-    return handleRegister(request);
-  }
-  if (routePath === 'auth/login') {
-    return handleLogin(request);
-  }
-  if (routePath === 'upload') {
-    return handleUpload(request);
-  }
-  if (routePath === 'process') {
-    return handleProcess(request);
-  }
-  return NextResponse.json({ error: 'Not found' }, { status: 404, headers: corsHeaders() });
+  if (routePath === 'auth/register') return handleRegister(request);
+  if (routePath === 'auth/login') return handleLogin(request);
+  if (routePath === 'upload') return handleUpload(request);
+  if (routePath === 'process') return handleProcess(request);
+
+  return jsonResponse({ error: 'Not found' }, 404);
 }
 
 export async function PUT(request, context) {
@@ -553,10 +677,9 @@ export async function PUT(request, context) {
   const pathSegments = params.path || [];
   const routePath = pathSegments.join('/');
 
-  if (routePath.startsWith('result/')) {
-    return handleUpdateResult(request, pathSegments[1]);
-  }
-  return NextResponse.json({ error: 'Not found' }, { status: 404, headers: corsHeaders() });
+  if (routePath.startsWith('result/')) return handleUpdateResult(request, pathSegments[1]);
+
+  return jsonResponse({ error: 'Not found' }, 404);
 }
 
 export async function DELETE(request, context) {
@@ -564,10 +687,9 @@ export async function DELETE(request, context) {
   const pathSegments = params.path || [];
   const routePath = pathSegments.join('/');
 
-  if (routePath.startsWith('file/')) {
-    return handleDeleteFile(request, pathSegments[1]);
-  }
-  return NextResponse.json({ error: 'Not found' }, { status: 404, headers: corsHeaders() });
+  if (routePath.startsWith('file/')) return handleDeleteFile(request, pathSegments[1]);
+
+  return jsonResponse({ error: 'Not found' }, 404);
 }
 
 export async function OPTIONS() {

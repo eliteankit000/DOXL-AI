@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "DocXL AI - SaaS app that converts PDFs, images, and bank statements into structured Excel data using AI. MongoDB-only auth, local file storage, OpenAI Vision via emergentintegrations Python library."
+user_problem_statement: "DocXL AI - MIGRATED to Supabase. SaaS app converting PDFs/images to Excel. Supabase Auth + PostgreSQL + Storage. AI extraction via Python emergentintegrations."
 
 backend:
   - task: "Health Check API"
@@ -113,14 +113,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "GET /api/health returns status ok"
+        - comment: "GET /api/health - returns {status:ok, backend:supabase}"
         - working: true
         - agent: "testing"
-        - comment: "✅ Health check API tested successfully. Returns {status: 'ok', service: 'DocXL AI API'} with 200 status code."
+        - comment: "✅ TESTED: Health check passed - Supabase backend confirmed. Returns correct status and backend type."
 
-  - task: "User Registration API"
+  - task: "User Registration (Supabase Auth)"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -128,14 +128,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "POST /api/auth/register - creates user with bcrypt hashed password, returns JWT"
+        - comment: "POST /api/auth/register - supabase.auth.admin.createUser with email_confirm:true. Auto-creates profile via DB trigger."
         - working: true
         - agent: "testing"
-        - comment: "✅ User registration API tested successfully. Creates user with bcrypt hashed password, returns JWT token and user data. Handles duplicate email registration correctly (409 status)."
+        - comment: "✅ TESTED: User registration successful. Creates user with email test_iwgvc3j3@docxl.com, returns user object with plan and credits."
 
-  - task: "User Login API"
+  - task: "User Login (Supabase Auth)"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -143,14 +143,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "POST /api/auth/login - verifies password, returns JWT"
+        - comment: "POST /api/auth/login - supabase.auth.signInWithPassword. Returns access_token + refresh_token."
         - working: true
         - agent: "testing"
-        - comment: "✅ User login API tested successfully. Verifies password with bcrypt, returns JWT token and user data with 200 status code."
+        - comment: "✅ TESTED: Login successful. Returns access_token and user data with plan (free) and credits (5)."
 
-  - task: "Get Current User API"
+  - task: "Get Current User"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -158,14 +158,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "GET /api/auth/me - returns user data from JWT token"
+        - comment: "GET /api/auth/me - verifies Supabase JWT, fetches profile from profiles table."
         - working: true
         - agent: "testing"
-        - comment: "✅ Get current user API tested successfully. Validates JWT Bearer token and returns user data including credits_remaining."
+        - comment: "✅ TESTED: Get user info successful. Returns complete user profile with ID, email, plan, and credits."
 
-  - task: "File Upload API"
+  - task: "File Upload (Supabase Storage)"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -173,14 +173,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "POST /api/upload - accepts multipart form, saves to /tmp/uploads, creates DB record"
+        - comment: "POST /api/upload - uploads to Supabase Storage uploads bucket + inserts DB record."
         - working: true
         - agent: "testing"
-        - comment: "✅ File upload API tested successfully. Accepts multipart form data, validates file types (PDF, JPG, PNG, WEBP), enforces 10MB size limit, saves to /tmp/uploads with user directory structure, creates DB record with UUID."
+        - comment: "✅ TESTED: File upload successful. Uploaded 800x600 PNG with financial data, returns upload ID and status 'uploaded'."
 
-  - task: "AI Process API"
+  - task: "AI Process"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -188,14 +188,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "POST /api/process - calls Python script (scripts/extract.py) for AI extraction using emergentintegrations library with gpt-4o model"
+        - comment: "POST /api/process - downloads from Supabase Storage, calls Python AI script, saves to results table, deducts credits."
         - working: true
         - agent: "testing"
-        - comment: "✅ AI Process API tested successfully. Fixed Python path issue (/root/.venv/bin/python3). Calls extraction script with emergentintegrations library, processes financial table image, extracts 8 rows of data correctly, returns structured JSON with document_type, rows, summary, and confidence_score. Deducts user credits properly."
+        - comment: "✅ TESTED: AI processing successful. Extracted 5 rows from invoice image, document_type: invoice, confidence: 0.85. Credits properly deducted."
 
-  - task: "Get Result API"
+  - task: "Get Result"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -203,14 +203,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "GET /api/result/:id - returns extracted data by id or upload_id"
+        - comment: "GET /api/result/:id - queries results table with uploads JOIN."
         - working: true
         - agent: "testing"
-        - comment: "✅ Get result API tested successfully. Retrieves extracted data by upload_id, returns complete result with rows, summary, confidence_score, file_name, and timestamps. Verifies user ownership correctly."
+        - comment: "✅ TESTED: Get result successful. Returns extracted data with 5 rows, upload_id, and file_name."
 
-  - task: "Export Excel API"
+  - task: "Export Excel"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -218,29 +218,14 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "GET /api/export/excel/:id - generates Excel file using exceljs"
+        - comment: "GET /api/export/excel/:id - generates xlsx from Supabase data."
         - working: true
         - agent: "testing"
-        - comment: "✅ Export Excel API tested successfully. Generates Excel file using exceljs library, returns proper XLSX binary with correct Content-Type header (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet), includes all extracted data rows with formatting."
+        - comment: "✅ TESTED: Excel export successful. Returns proper xlsx file (6820 bytes) with correct content-type."
 
-  - task: "List Uploads API"
-    implemented: true
-    working: true
-    file: "app/api/[[...path]]/route.js"
-    stuck_count: 0
-    priority: "medium"
-    needs_retesting: false
-    status_history:
-        - working: "NA"
-        - agent: "main"
-        - comment: "GET /api/uploads - lists user uploads"
-        - working: true
-        - agent: "testing"
-        - comment: "✅ List uploads API tested successfully. Returns user's uploads sorted by created_at descending, includes file metadata (id, file_name, file_type, status, error_message, created_at). Verifies user ownership correctly."
-
-  - task: "Delete File API"
+  - task: "List Uploads"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -248,14 +233,14 @@ backend:
     priority: "medium"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "DELETE /api/file/:id - deletes file from disk and DB"
+        - comment: "GET /api/uploads - queries Supabase uploads table."
         - working: true
         - agent: "testing"
-        - comment: "✅ Delete file API tested successfully. Deletes physical file from disk and removes records from both uploads and extracted_data collections. Verifies user ownership before deletion."
+        - comment: "✅ TESTED: Get uploads successful. Returns user uploads list, verified upload status as 'completed'."
 
-  - task: "Update Result API"
+  - task: "Delete File"
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js"
@@ -263,100 +248,44 @@ backend:
     priority: "medium"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "PUT /api/result/:id - updates edited rows"
+        - comment: "DELETE /api/file/:id - deletes from Supabase Storage + DB."
         - working: true
         - agent: "testing"
-        - comment: "✅ Update result API tested successfully. Updates extracted data rows in database, accepts modified rows array, verifies user ownership, updates timestamp. Tested with row modifications and new row additions."
+        - comment: "✅ TESTED: Delete file successful. File removed from both Supabase Storage and database, verified by checking uploads list."
 
-frontend:
-  - task: "Landing Page"
+  - task: "Update Result"
     implemented: true
-    working: "NA"
-    file: "app/page.js"
+    working: true
+    file: "app/api/[[...path]]/route.js"
     stuck_count: 0
-    priority: "high"
+    priority: "medium"
     needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: true
         - agent: "main"
-        - comment: "Landing page with hero, features, pricing, footer"
-
-  - task: "Auth Flow"
-    implemented: true
-    working: "NA"
-    file: "app/page.js"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: "NA"
-        - agent: "main"
-        - comment: "Login/Register forms with JWT token storage"
-
-  - task: "Dashboard"
-    implemented: true
-    working: "NA"
-    file: "app/page.js"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: "NA"
-        - agent: "main"
-        - comment: "Dashboard with stats, upload box, recent uploads"
-
-  - task: "Upload Flow"
-    implemented: true
-    working: "NA"
-    file: "app/page.js"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: "NA"
-        - agent: "main"
-        - comment: "Drag and drop upload with file validation"
-
-  - task: "Processing View"
-    implemented: true
-    working: "NA"
-    file: "app/page.js"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: "NA"
-        - agent: "main"
-        - comment: "3-step processing animation with real API call"
-
-  - task: "Result View with Editable Table"
-    implemented: true
-    working: "NA"
-    file: "app/page.js"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: "NA"
-        - agent: "main"
-        - comment: "Editable table with inline cell editing, add/delete rows, save, export buttons"
+        - comment: "PUT /api/result/:id - updates edited_json in results table."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Update result successful. Edited rows data saved properly, returns success message."
 
 metadata:
   created_by: "main_agent"
-  version: "1.0"
-  test_sequence: 2
+  version: "2.0"
+  test_sequence: 3
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "All backend endpoints - Supabase migration verification"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
     - agent: "main"
-    - message: "All backend APIs are implemented. Please test all endpoints. For AI processing test, create a simple test image (like a table with financial data) and upload it. The Python extraction script at /app/scripts/extract.py uses the emergentintegrations library with EMERGENT_LLM_KEY env var. The API base URL is https://docxl-ai.preview.emergentagent.com/api. Auth uses JWT Bearer tokens. Register first, then use the token for authenticated endpoints. Also read /app/image_testing.md for image testing rules."
+    - message: "COMPLETE SUPABASE MIGRATION. All APIs use Supabase (Auth + Storage + PostgreSQL). No MongoDB. Auth uses Supabase tokens. Register via admin.createUser, login via signInWithPassword. Files in Supabase Storage uploads bucket. Read /app/image_testing.md for image rules. Python script at /app/scripts/extract.py. EMERGENT_LLM_KEY in .env. Supabase credentials in .env."
     - agent: "testing"
-    - message: "✅ ALL BACKEND TESTS COMPLETED SUCCESSFULLY! Fixed critical Python path issue in AI processing (changed python3 to /root/.venv/bin/python3). All 11 backend API endpoints tested and working: Health Check, User Registration, User Login, Get Current User, File Upload, AI Process (with real financial table image), Get Result, Export Excel, List Uploads, Update Result, Delete File. AI processing successfully extracts structured data from images using emergentintegrations library with gpt-4o model. Excel export generates proper XLSX files. All authentication, file handling, and database operations working correctly. 100% test success rate."
+    - message: "✅ BACKEND TESTING COMPLETE: All 11 backend endpoints tested successfully (13/13 tests passed). Supabase migration fully verified. Health check confirms Supabase backend. Auth flow working (register/login/me). File upload to Supabase Storage working. AI processing extracts data correctly and deducts credits. Excel export generates proper xlsx files. CRUD operations on uploads/results working. All endpoints use proper Supabase authentication. No critical issues found."
+
