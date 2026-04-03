@@ -8,7 +8,7 @@ import json
 import uuid
 
 # Configuration
-BASE_URL = "https://ai-doc-stable.preview.emergentagent.com/api"
+BASE_URL = "https://job-optimizer-6.preview.emergentagent.com/api"
 HEADERS = {"Content-Type": "application/json"}
 
 def test_fallback_credit_deduction():

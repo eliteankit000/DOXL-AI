@@ -15,7 +15,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw
 
 # Configuration
-BASE_URL = "https://ai-doc-stable.preview.emergentagent.com/api"
+BASE_URL = "https://job-optimizer-6.preview.emergentagent.com/api"
 CRON_SECRET = "docxl_cron_2024_secure_9k3m2p1x"
 
 class DocXLTester:

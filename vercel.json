@@ -10,8 +10,8 @@
   },
   "crons": [
     {
-      "path": "/api/cron/cleanup",
-      "schedule": "0 */6 * * *"
+      "path": "/api/cron/cleanup-files",
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/reset-credits",

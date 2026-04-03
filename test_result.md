@@ -435,6 +435,12 @@ test_plan:
         - working: true
         - agent: "testing"
         - comment: "✅ TESTED: Cron Automation Endpoints working perfectly! Both endpoints correctly reject unauthorized requests (401) without CRON_SECRET. With proper Authorization header using CRON_SECRET='docxl_cron_2024_secure_9k3m2p1x': POST /api/cron/cleanup successfully deleted 0 old files (none found >48h), POST /api/cron/reset-credits successfully reset 0 Pro users (none found). Security and functionality verified."
+        - working: true
+        - agent: "main"
+        - comment: "✅ VERCEL HOBBY FIX: Updated cron schedule from '0 */6 * * *' (every 6h) to '0 0 * * *' (daily at midnight). Renamed path from /api/cron/cleanup to /api/cron/cleanup-files. Added enhanced logging for execution tracking. Both crons now compatible with Vercel Hobby plan (max 1 run/day)."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Vercel Hobby Plan Compatibility verified! NEW PATH /api/cron/cleanup-files properly secured (401 without auth). OLD PATH /api/cron/cleanup still works (backward compatible). Both endpoints reject invalid CRON_SECRET. vercel.json updated with correct schedule: cleanup-files daily (0 0 * * *), reset-credits monthly (0 0 1 * *). Security layer working correctly - all unauthorized requests return 401."
 
 metadata:
   created_by: "main_agent"
@@ -462,4 +468,6 @@ agent_communication:
     - message: "🚀 PRODUCTION READINESS COMPLETE: Replaced emergentintegrations with official OpenAI SDK (gpt-4o direct). Fixed shell injection vulnerability (exec→execFile). Fixed payment security exploit (JWT-based user verification). Added timeout refund system. Increased upload limit to 100MB. Created vercel.json with 300s timeout and cron jobs. Added Paddle payment framework (awaits credentials). Created full Terms of Service. Updated contact form with Formspree integration. Created database migration for usage_logs. Added .env.example, DEPLOYMENT.md, README.md, and PRODUCTION_AUDIT.md. ALL 14 SECTIONS COMPLETE. Ready for backend testing of new critical features."
     - agent: "testing"
     - message: "🎉 PRODUCTION READINESS TESTING COMPLETE: All 11/11 tests passed! ✅ OpenAI Direct Integration working with gpt-4o model - AI processing successful. ✅ Shell Injection Fix verified - malicious commands treated as text, not executed. ✅ Payment Security Fix working - user extracted from JWT, not frontend. ✅ Timeout Refund System implemented correctly. ✅ Paddle Payment Framework ready (gracefully handles missing credentials). ✅ Cron Automation Endpoints working with proper CRON_SECRET protection. ✅ Upload limit increased to 100MB. ✅ All existing endpoints still working. ALL CRITICAL SECURITY AND FUNCTIONALITY FEATURES VERIFIED. DocXL AI is production-ready!"
+    - agent: "testing"
+    - message: "✅ VERCEL HOBBY COMPATIBILITY VERIFIED: Tested updated cron endpoints for Vercel Hobby plan compatibility. NEW PATH /api/cron/cleanup-files properly secured with 401 responses for unauthorized access. OLD PATH /api/cron/cleanup maintains backward compatibility. Both endpoints reject invalid CRON_SECRET. vercel.json configuration updated: cleanup-files runs daily (0 0 * * *), reset-credits runs monthly (0 0 1 * *). All security tests passed (6/6). Cron endpoints ready for Vercel Hobby plan deployment."
 

@@ -935,31 +935,46 @@ async function handlePaddleWebhook(request) {
 // =============================================
 
 async function handleCleanupCron(request) {
+  const startTime = Date.now();
+  console.log('[CRON] cleanup-files: Execution started at', new Date().toISOString());
+  
   try {
     // Verify CRON_SECRET
     const authHeader = request.headers.get('authorization');
     const cronSecret = authHeader?.replace('Bearer ', '');
     
     if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+      console.log('[CRON] cleanup-files: Unauthorized request rejected');
       return jsonResponse({ error: 'Unauthorized' }, 401);
     }
 
     const supabase = getSupabaseAdmin();
     const cutoffDate = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48 hours ago
+    console.log('[CRON] cleanup-files: Cutoff date =', cutoffDate.toISOString());
 
     // Get old uploads
-    const { data: oldUploads } = await supabase
+    const { data: oldUploads, error: fetchError } = await supabase
       .from('uploads')
       .select('id, file_path')
       .lt('created_at', cutoffDate.toISOString())
       .limit(100);
 
+    if (fetchError) {
+      console.error('[CRON] cleanup-files: Error fetching old uploads:', fetchError);
+      throw fetchError;
+    }
+
     let deletedCount = 0;
     if (oldUploads && oldUploads.length > 0) {
+      console.log('[CRON] cleanup-files: Found', oldUploads.length, 'files to delete');
+      
       // Delete from storage
       const filePaths = oldUploads.map(u => u.file_path).filter(Boolean);
       if (filePaths.length > 0) {
-        await supabase.storage.from('uploads').remove(filePaths);
+        const { error: storageError } = await supabase.storage.from('uploads').remove(filePaths);
+        if (storageError) {
+          console.error('[CRON] cleanup-files: Storage delete error:', storageError);
+        }
       }
 
       // Delete from database
@@ -970,42 +985,60 @@ async function handleCleanupCron(request) {
       deletedCount = oldUploads.length;
     }
 
+    const duration = Date.now() - startTime;
+    console.log(`[CRON] cleanup-files: Completed. Deleted ${deletedCount} files in ${duration}ms`);
+
     return jsonResponse({
       success: true,
       deleted: deletedCount,
       cutoff: cutoffDate.toISOString(),
+      duration_ms: duration,
     });
   } catch (error) {
-    console.error('[handleCleanupCron] error:', error);
+    console.error('[CRON] cleanup-files: Error:', error);
     return jsonResponse({ error: 'Cleanup failed' }, 500);
   }
 }
 
 async function handleResetCreditsCron(request) {
+  const startTime = Date.now();
+  console.log('[CRON] reset-credits: Execution started at', new Date().toISOString());
+  
   try {
     // Verify CRON_SECRET
     const authHeader = request.headers.get('authorization');
     const cronSecret = authHeader?.replace('Bearer ', '');
     
     if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+      console.log('[CRON] reset-credits: Unauthorized request rejected');
       return jsonResponse({ error: 'Unauthorized' }, 401);
     }
 
     const supabase = getSupabaseAdmin();
 
     // Reset all Pro users to 300 credits
-    const { data: updated } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('profiles')
       .update({ credits: 300 })
       .eq('plan', 'pro')
       .select('id');
 
+    if (updateError) {
+      console.error('[CRON] reset-credits: Update error:', updateError);
+      throw updateError;
+    }
+
+    const resetCount = updated?.length || 0;
+    const duration = Date.now() - startTime;
+    console.log(`[CRON] reset-credits: Completed. Reset ${resetCount} Pro users in ${duration}ms`);
+
     return jsonResponse({
       success: true,
-      reset_count: updated?.length || 0,
+      reset_count: resetCount,
+      duration_ms: duration,
     });
   } catch (error) {
-    console.error('[handleResetCreditsCron] error:', error);
+    console.error('[CRON] reset-credits: Error:', error);
     return jsonResponse({ error: 'Credit reset failed' }, 500);
   }
 }
@@ -1043,7 +1076,7 @@ export async function POST(request, context) {
   if (routePath === 'payment/verify') return handlePaymentVerify(request);
   if (routePath === 'payment/paddle/checkout') return handlePaddleCheckout(request);
   if (routePath === 'webhooks/paddle') return handlePaddleWebhook(request);
-  if (routePath === 'cron/cleanup') return handleCleanupCron(request);
+  if (routePath === 'cron/cleanup-files' || routePath === 'cron/cleanup') return handleCleanupCron(request);
   if (routePath === 'cron/reset-credits') return handleResetCreditsCron(request);
 
   return jsonResponse({ error: 'Not found' }, 404);
