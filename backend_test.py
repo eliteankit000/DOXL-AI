@@ -13,7 +13,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
 # Configuration
-BASE_URL = "https://sheet-converter-33.preview.emergentagent.com/api"
+BASE_URL = "https://ai-doc-stable.preview.emergentagent.com/api"
 HEADERS = {"Content-Type": "application/json"}
 
 class DocXLTester:
