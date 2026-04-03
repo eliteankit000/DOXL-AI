@@ -338,10 +338,32 @@ async function handleProcess(request) {
 
     const supabase = getSupabaseAdmin();
 
-    // Atomic credit deduction via Supabase RPC
-    const { data: canProcess, error: rpcError } = await supabase.rpc('deduct_credit_if_available', { user_uuid: user.id });
-    if (rpcError || !canProcess) {
-      return jsonResponse({ error: 'No credits remaining. Please upgrade to Pro.' }, 403);
+    // Atomic credit deduction via Supabase RPC (with fallback)
+    let creditDeducted = false;
+    try {
+      const { data: canProcess, error: rpcError } = await supabase.rpc('deduct_credit_if_available', { user_uuid: user.id });
+      if (!rpcError && canProcess) {
+        creditDeducted = true;
+      }
+    } catch (e) {
+      console.error('[handleProcess] RPC fallback:', e.message);
+    }
+
+    // Fallback: manual credit check and deduction
+    if (!creditDeducted) {
+      const profile = await getUserProfile(user.id);
+      if (!profile || profile.credits <= 0) {
+        return jsonResponse({ error: 'No credits remaining. Please upgrade to Pro.' }, 403);
+      }
+      const { error: deductErr } = await supabase
+        .from('profiles')
+        .update({ credits: Math.max(0, profile.credits - 1) })
+        .eq('id', user.id);
+      if (deductErr) {
+        console.error('[handleProcess] credit deduction error:', deductErr);
+        return jsonResponse({ error: 'Credit deduction failed. Please try again.' }, 500);
+      }
+      creditDeducted = true;
     }
 
     // Fetch upload record

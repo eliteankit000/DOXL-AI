@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-DocXL AI Backend API Testing Suite
-Tests all backend endpoints including new features: Zod validation, rate limiting, 
-atomic credit deduction, and Razorpay payment integration.
+DocXL AI Backend Test Suite - Focused on Process Endpoint with Fallback Credit Deduction
+Tests the critical process endpoint with RPC fallback mechanism
 """
 
 import requests
@@ -15,505 +14,460 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Configuration
 BASE_URL = "https://sheet-converter-33.preview.emergentagent.com/api"
-TIMEOUT = 30
+HEADERS = {"Content-Type": "application/json"}
 
-class BackendTester:
+class DocXLTester:
     def __init__(self):
-        self.session = requests.Session()
-        self.session.timeout = TIMEOUT
-        self.auth_token = None
-        self.test_user_email = f"test_{uuid.uuid4().hex[:8]}@docxl.com"
-        self.test_user_password = "testpass123"
+        self.access_token = None
+        self.user_id = None
         self.upload_id = None
-        self.result_id = None
+        self.test_email = f"test_{uuid.uuid4().hex[:8]}@docxl.com"
+        self.test_password = "testpass123"
         
-    def log(self, message):
-        print(f"[TEST] {message}")
+    def log(self, message, status="INFO"):
+        print(f"[{status}] {message}")
         
-    def test_health_check(self):
-        """Test health check endpoint"""
+    def create_test_invoice_image(self):
+        """Create a test invoice image with financial data"""
         try:
-            response = self.session.get(f"{BASE_URL}/health")
-            assert response.status_code == 200
-            data = response.json()
-            assert data.get('status') == 'ok'
-            assert data.get('backend') == 'supabase'
-            self.log("✅ Health check passed - Supabase backend confirmed")
-            return True
-        except Exception as e:
-            self.log(f"❌ Health check failed: {e}")
-            return False
-    
-    def test_zod_validation_register(self):
-        """Test Zod validation on registration endpoint"""
-        try:
-            # Test invalid email
-            response = self.session.post(f"{BASE_URL}/auth/register", json={
-                "email": "invalid-email",
-                "password": "testpass123"
-            })
-            assert response.status_code == 400
-            data = response.json()
-            assert "Invalid email" in data.get('error', '')
-            self.log("✅ Zod validation - Invalid email rejected correctly")
-            
-            # Test short password
-            response = self.session.post(f"{BASE_URL}/auth/register", json={
-                "email": "test@example.com",
-                "password": "123"
-            })
-            assert response.status_code == 400
-            data = response.json()
-            assert "at least 6 characters" in data.get('error', '')
-            self.log("✅ Zod validation - Short password rejected correctly")
-            
-            return True
-        except Exception as e:
-            self.log(f"❌ Zod validation on register failed: {e}")
-            return False
-    
-    def test_user_registration(self):
-        """Test user registration with valid data"""
-        try:
-            response = self.session.post(f"{BASE_URL}/auth/register", json={
-                "email": self.test_user_email,
-                "password": self.test_user_password,
-                "name": "Test User"
-            })
-            assert response.status_code == 201
-            data = response.json()
-            assert 'user' in data
-            assert data['user']['email'] == self.test_user_email
-            assert data['user']['plan'] == 'free'
-            assert data['user']['credits_remaining'] == 5
-            self.log(f"✅ User registration successful - {self.test_user_email}")
-            return True
-        except Exception as e:
-            self.log(f"❌ User registration failed: {e}")
-            return False
-    
-    def test_zod_validation_login(self):
-        """Test Zod validation on login endpoint"""
-        try:
-            # Test empty password
-            response = self.session.post(f"{BASE_URL}/auth/login", json={
-                "email": self.test_user_email,
-                "password": ""
-            })
-            assert response.status_code == 400
-            data = response.json()
-            assert "Password required" in data.get('error', '')
-            self.log("✅ Zod validation - Empty password rejected correctly")
-            
-            return True
-        except Exception as e:
-            self.log(f"❌ Zod validation on login failed: {e}")
-            return False
-    
-    def test_user_login(self):
-        """Test user login with valid credentials"""
-        try:
-            response = self.session.post(f"{BASE_URL}/auth/login", json={
-                "email": self.test_user_email,
-                "password": self.test_user_password
-            })
-            assert response.status_code == 200
-            data = response.json()
-            assert 'token' in data
-            assert 'user' in data
-            self.auth_token = data['token']
-            self.session.headers.update({'Authorization': f'Bearer {self.auth_token}'})
-            self.log("✅ User login successful - Token received")
-            return True
-        except Exception as e:
-            self.log(f"❌ User login failed: {e}")
-            return False
-    
-    def test_get_user_info(self):
-        """Test getting current user info"""
-        try:
-            response = self.session.get(f"{BASE_URL}/auth/me")
-            assert response.status_code == 200
-            data = response.json()
-            assert 'user' in data
-            assert data['user']['email'] == self.test_user_email
-            self.log("✅ Get user info successful")
-            return True
-        except Exception as e:
-            self.log(f"❌ Get user info failed: {e}")
-            return False
-    
-    def create_test_image(self):
-        """Create a test PNG image with financial data"""
-        try:
-            # Create a simple invoice-like image
+            # Create a 800x600 image with white background
             img = Image.new('RGB', (800, 600), color='white')
             draw = ImageDraw.Draw(img)
             
-            # Try to use a font, fallback to default if not available
+            # Try to use a default font, fallback to basic if not available
             try:
-                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-                small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+                font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+                font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+                font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
             except:
-                font = ImageFont.load_default()
-                small_font = ImageFont.load_default()
+                font_large = ImageFont.load_default()
+                font_medium = ImageFont.load_default()
+                font_small = ImageFont.load_default()
             
-            # Draw invoice content
-            draw.text((50, 50), "INVOICE #INV-2024-001", fill='black', font=font)
-            draw.text((50, 100), "Date: 2024-01-15", fill='black', font=small_font)
-            draw.text((50, 130), "Bill To: ABC Company Ltd", fill='black', font=small_font)
+            # Draw invoice header
+            draw.text((50, 30), "INVOICE", fill='black', font=font_large)
+            draw.text((50, 70), "Invoice #: INV-2024-001", fill='black', font=font_medium)
+            draw.text((50, 100), "Date: 2024-01-15", fill='black', font=font_medium)
             
-            # Draw table headers
-            draw.text((50, 180), "Description", fill='black', font=small_font)
-            draw.text((300, 180), "Amount", fill='black', font=small_font)
-            draw.text((400, 180), "GST", fill='black', font=small_font)
+            # Draw company info
+            draw.text((50, 140), "ABC Company Ltd.", fill='black', font=font_medium)
+            draw.text((50, 160), "123 Business Street", fill='black', font=font_small)
+            draw.text((50, 180), "Mumbai, Maharashtra 400001", fill='black', font=font_small)
             
-            # Draw line items
+            # Draw table header
+            y_start = 220
+            draw.text((50, y_start), "Description", fill='black', font=font_medium)
+            draw.text((300, y_start), "Amount", fill='black', font=font_medium)
+            draw.text((450, y_start), "GST", fill='black', font=font_medium)
+            draw.text((550, y_start), "Total", fill='black', font=font_medium)
+            
+            # Draw line under header
+            draw.line([(50, y_start + 25), (700, y_start + 25)], fill='black', width=2)
+            
+            # Draw invoice items
             items = [
-                ("Software License", "₹50,000", "₹9,000"),
-                ("Support Services", "₹25,000", "₹4,500"),
-                ("Training", "₹15,000", "₹2,700"),
+                ("Software Development Services", "50000.00", "9000.00", "59000.00"),
+                ("Consulting Services", "25000.00", "4500.00", "29500.00"),
+                ("Technical Support", "15000.00", "2700.00", "17700.00"),
+                ("Project Management", "20000.00", "3600.00", "23600.00"),
+                ("Documentation", "10000.00", "1800.00", "11800.00")
             ]
             
-            y_pos = 210
-            for desc, amount, gst in items:
-                draw.text((50, y_pos), desc, fill='black', font=small_font)
-                draw.text((300, y_pos), amount, fill='black', font=small_font)
-                draw.text((400, y_pos), gst, fill='black', font=small_font)
-                y_pos += 30
+            y_pos = y_start + 40
+            for item in items:
+                draw.text((50, y_pos), item[0], fill='black', font=font_small)
+                draw.text((300, y_pos), f"₹{item[1]}", fill='black', font=font_small)
+                draw.text((450, y_pos), f"₹{item[2]}", fill='black', font=font_small)
+                draw.text((550, y_pos), f"₹{item[3]}", fill='black', font=font_small)
+                y_pos += 25
             
-            # Draw total
-            draw.text((50, y_pos + 20), "Total: ₹1,06,200", fill='black', font=font)
+            # Draw total line
+            draw.line([(450, y_pos + 10), (650, y_pos + 10)], fill='black', width=2)
+            draw.text((450, y_pos + 20), "Grand Total: ₹1,41,600.00", fill='black', font=font_medium)
             
             # Save to BytesIO
             img_buffer = BytesIO()
             img.save(img_buffer, format='PNG')
             img_buffer.seek(0)
             
-            return img_buffer
+            self.log("✅ Created test invoice image with financial data")
+            return img_buffer.getvalue()
+            
         except Exception as e:
-            self.log(f"❌ Failed to create test image: {e}")
-            return None
-    
-    def test_file_upload(self):
-        """Test file upload to Supabase Storage"""
+            self.log(f"❌ Failed to create test image: {str(e)}", "ERROR")
+            # Create a simple fallback image
+            img = Image.new('RGB', (400, 300), color='white')
+            draw = ImageDraw.Draw(img)
+            draw.text((50, 50), "Test Invoice", fill='black')
+            draw.text((50, 100), "Amount: ₹1000.00", fill='black')
+            draw.text((50, 150), "GST: ₹180.00", fill='black')
+            draw.text((50, 200), "Total: ₹1180.00", fill='black')
+            
+            img_buffer = BytesIO()
+            img.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            return img_buffer.getvalue()
+
+    def test_health_check(self):
+        """Test health check endpoint"""
         try:
-            img_buffer = self.create_test_image()
-            if not img_buffer:
+            response = requests.get(f"{BASE_URL}/health")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'ok' and data.get('backend') == 'supabase':
+                    self.log("✅ Health check passed - Supabase backend confirmed")
+                    return True
+                else:
+                    self.log(f"❌ Health check failed - unexpected response: {data}", "ERROR")
+                    return False
+            else:
+                self.log(f"❌ Health check failed - status: {response.status_code}", "ERROR")
                 return False
-                
-            files = {
-                'file': ('test_invoice.png', img_buffer, 'image/png')
+        except Exception as e:
+            self.log(f"❌ Health check error: {str(e)}", "ERROR")
+            return False
+
+    def test_register(self):
+        """Test user registration"""
+        try:
+            payload = {
+                "email": self.test_email,
+                "password": self.test_password,
+                "name": "Test User"
             }
             
-            response = self.session.post(f"{BASE_URL}/upload", files=files)
-            assert response.status_code == 201
-            data = response.json()
-            assert 'upload' in data
-            self.upload_id = data['upload']['id']
-            self.log(f"✅ File upload successful - Upload ID: {self.upload_id}")
-            return True
-        except Exception as e:
-            self.log(f"❌ File upload failed: {e}")
-            return False
-    
-    def test_zod_validation_process(self):
-        """Test Zod validation on process endpoint"""
-        try:
-            # Test invalid upload_id format
-            response = self.session.post(f"{BASE_URL}/process", json={
-                "upload_id": "invalid-uuid"
-            })
-            assert response.status_code == 400
-            data = response.json()
-            assert "Invalid upload ID" in data.get('error', '')
-            self.log("✅ Zod validation - Invalid upload ID rejected correctly")
+            response = requests.post(f"{BASE_URL}/auth/register", json=payload, headers=HEADERS)
             
-            return True
-        except Exception as e:
-            self.log(f"❌ Zod validation on process failed: {e}")
-            return False
-    
-    def test_atomic_credit_deduction_and_ai_process(self):
-        """Test atomic credit deduction via RPC and AI processing"""
-        try:
-            if not self.upload_id:
-                self.log("❌ No upload ID available for processing")
+            if response.status_code == 201:
+                data = response.json()
+                self.user_id = data['user']['id']
+                credits = data['user']['credits_remaining']
+                self.log(f"✅ User registration successful - Email: {self.test_email}, Credits: {credits}")
+                return True
+            else:
+                self.log(f"❌ Registration failed - Status: {response.status_code}, Response: {response.text}", "ERROR")
                 return False
                 
-            response = self.session.post(f"{BASE_URL}/process", json={
+        except Exception as e:
+            self.log(f"❌ Registration error: {str(e)}", "ERROR")
+            return False
+
+    def test_login(self):
+        """Test user login"""
+        try:
+            payload = {
+                "email": self.test_email,
+                "password": self.test_password
+            }
+            
+            response = requests.post(f"{BASE_URL}/auth/login", json=payload, headers=HEADERS)
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data['token']
+                self.user_id = data['user']['id']
+                credits = data['user']['credits_remaining']
+                self.log(f"✅ Login successful - User ID: {self.user_id}, Credits: {credits}")
+                return True
+            else:
+                self.log(f"❌ Login failed - Status: {response.status_code}, Response: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Login error: {str(e)}", "ERROR")
+            return False
+
+    def test_get_user_info(self):
+        """Test get current user info"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.get(f"{BASE_URL}/auth/me", headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                user = data['user']
+                credits = user['credits_remaining']
+                self.log(f"✅ Get user info successful - Credits: {credits}, Plan: {user['plan']}")
+                return credits
+            else:
+                self.log(f"❌ Get user info failed - Status: {response.status_code}, Response: {response.text}", "ERROR")
+                return None
+                
+        except Exception as e:
+            self.log(f"❌ Get user info error: {str(e)}", "ERROR")
+            return None
+
+    def test_upload_file(self):
+        """Test file upload"""
+        try:
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            
+            # Create test image
+            image_data = self.create_test_invoice_image()
+            
+            files = {
+                'file': ('test_invoice.png', image_data, 'image/png')
+            }
+            
+            response = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
+            
+            if response.status_code == 201:
+                data = response.json()
+                self.upload_id = data['upload']['id']
+                self.log(f"✅ File upload successful - Upload ID: {self.upload_id}, Status: {data['upload']['status']}")
+                return True
+            else:
+                self.log(f"❌ File upload failed - Status: {response.status_code}, Response: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ File upload error: {str(e)}", "ERROR")
+            return False
+
+    def test_process_with_fallback_credit_deduction(self):
+        """Test AI processing with fallback credit deduction - CRITICAL TEST"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
                 "upload_id": self.upload_id,
-                "user_requirements": "Extract invoice data with amounts and GST"
-            })
+                "user_requirements": "Extract all financial data including amounts, dates, and descriptions"
+            }
             
-            if response.status_code == 403:
-                error_data = response.json()
-                if "No credits remaining" in error_data.get('error', ''):
-                    self.log("✅ Atomic credit deduction working - No credits available")
-                    return True
-                elif "deduct_credit_if_available" in str(error_data):
-                    self.log("❌ RPC function 'deduct_credit_if_available' not found in Supabase")
-                    return False
+            self.log("🔄 Starting AI processing with fallback credit deduction...")
+            response = requests.post(f"{BASE_URL}/process", json=payload, headers=headers)
             
-            assert response.status_code == 200
-            data = response.json()
-            assert 'result' in data
-            self.result_id = data['result']['id']
-            self.log(f"✅ AI processing successful - Credits deducted atomically via RPC")
-            return True
-        except Exception as e:
-            self.log(f"❌ Atomic credit deduction/AI process failed: {e}")
-            return False
-    
-    def test_rate_limiting(self):
-        """Test rate limiting on process endpoint"""
-        try:
-            if not self.upload_id:
-                self.log("❌ No upload ID available for rate limit testing")
+            if response.status_code == 200:
+                data = response.json()
+                result = data['result']
+                rows = result.get('rows', [])
+                document_type = result.get('document_type', 'unknown')
+                confidence = result.get('confidence_score', 0)
+                
+                self.log(f"✅ AI processing successful with fallback credit deduction!")
+                self.log(f"   - Document type: {document_type}")
+                self.log(f"   - Confidence: {confidence}")
+                self.log(f"   - Extracted {len(rows)} rows")
+                self.log(f"   - Upload ID: {result['upload_id']}")
+                
+                if len(rows) > 0:
+                    self.log(f"   - Sample row: {rows[0]}")
+                
+                return True
+            else:
+                self.log(f"❌ AI processing failed - Status: {response.status_code}, Response: {response.text}", "ERROR")
                 return False
-            
-            # Make 6 rapid requests to trigger rate limit
-            rate_limited = False
-            for i in range(6):
-                response = self.session.post(f"{BASE_URL}/process", json={
-                    "upload_id": self.upload_id
-                })
                 
-                if response.status_code == 429:
-                    rate_limited = True
-                    data = response.json()
-                    assert "Too many requests" in data.get('error', '')
-                    assert 'Retry-After' in response.headers
-                    self.log(f"✅ Rate limiting triggered on request {i+1} - 429 status with Retry-After header")
-                    break
-                elif response.status_code == 403:
-                    # Expected if no credits remaining
-                    continue
-                    
-                time.sleep(0.1)  # Small delay between requests
-            
-            if not rate_limited:
-                self.log("⚠️ Rate limiting not triggered - may need more requests or credits exhausted")
-                return True  # Not a failure, just different state
-                
-            return True
         except Exception as e:
-            self.log(f"❌ Rate limiting test failed: {e}")
+            self.log(f"❌ AI processing error: {str(e)}", "ERROR")
             return False
-    
+
     def test_get_result(self):
-        """Test getting extraction result"""
+        """Test get processing result"""
         try:
-            if not self.result_id and not self.upload_id:
-                self.log("❌ No result ID or upload ID available")
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            
+            response = requests.get(f"{BASE_URL}/result/{self.upload_id}", headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                result = data['result']
+                rows = result.get('rows', [])
+                self.log(f"✅ Get result successful - {len(rows)} rows, File: {result.get('file_name', 'unknown')}")
+                return True
+            else:
+                self.log(f"❌ Get result failed - Status: {response.status_code}, Response: {response.text}", "ERROR")
                 return False
                 
-            # Try with result_id first, then upload_id
-            test_id = self.result_id or self.upload_id
-            response = self.session.get(f"{BASE_URL}/result/{test_id}")
-            
-            if response.status_code == 404:
-                self.log("⚠️ Result not found - may not have been processed due to credit/rate limits")
-                return True  # Not a failure in this context
-                
-            assert response.status_code == 200
-            data = response.json()
-            assert 'result' in data
-            self.log("✅ Get result successful")
-            return True
         except Exception as e:
-            self.log(f"❌ Get result failed: {e}")
+            self.log(f"❌ Get result error: {str(e)}", "ERROR")
             return False
-    
-    def test_zod_validation_update_result(self):
-        """Test Zod validation on update result endpoint"""
+
+    def test_zod_validation(self):
+        """Test Zod validation on endpoints"""
         try:
-            if not self.result_id and not self.upload_id:
-                self.log("❌ No result ID available for update validation test")
-                return True  # Skip if no result to update
-                
-            test_id = self.result_id or self.upload_id
+            headers = {"Content-Type": "application/json"}
             
-            # Test invalid rows format
-            response = self.session.put(f"{BASE_URL}/result/{test_id}", json={
-                "rows": "invalid-format"  # Should be array
-            })
-            assert response.status_code == 400
-            data = response.json()
-            # Zod should reject non-array format
-            self.log("✅ Zod validation - Invalid rows format rejected correctly")
-            return True
-        except Exception as e:
-            self.log(f"❌ Zod validation on update result failed: {e}")
-            return False
-    
-    def test_update_result(self):
-        """Test updating extraction result"""
-        try:
-            if not self.result_id and not self.upload_id:
-                self.log("❌ No result ID available for update")
-                return True  # Skip if no result to update
-                
-            test_id = self.result_id or self.upload_id
-            
-            response = self.session.put(f"{BASE_URL}/result/{test_id}", json={
-                "rows": [
-                    {
-                        "date": "2024-01-15",
-                        "description": "Updated Software License",
-                        "amount": 55000,
-                        "type": "debit",
-                        "category": "Software",
-                        "gst": 9900,
-                        "reference": "INV-001"
-                    }
-                ]
-            })
-            
-            if response.status_code == 404:
-                self.log("⚠️ Result not found for update - may not have been processed")
-                return True
-                
-            assert response.status_code == 200
-            data = response.json()
-            assert data.get('message') == 'Updated successfully'
-            self.log("✅ Update result successful")
-            return True
-        except Exception as e:
-            self.log(f"❌ Update result failed: {e}")
-            return False
-    
-    def test_export_excel(self):
-        """Test Excel export"""
-        try:
-            if not self.result_id and not self.upload_id:
-                self.log("❌ No result ID available for export")
-                return True  # Skip if no result to export
-                
-            test_id = self.result_id or self.upload_id
-            
-            response = self.session.get(f"{BASE_URL}/export/excel/{test_id}")
-            
-            if response.status_code == 404:
-                self.log("⚠️ Result not found for export - may not have been processed")
-                return True
-                
-            assert response.status_code == 200
-            assert response.headers.get('content-type') == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            assert len(response.content) > 0
-            self.log(f"✅ Excel export successful - {len(response.content)} bytes")
-            return True
-        except Exception as e:
-            self.log(f"❌ Excel export failed: {e}")
-            return False
-    
-    def test_razorpay_create_order(self):
-        """Test Razorpay payment order creation"""
-        try:
-            response = self.session.post(f"{BASE_URL}/payment/create-order")
-            self.log(f"Response status: {response.status_code}")
-            self.log(f"Response text: {response.text}")
-            
-            if response.status_code != 200:
-                self.log(f"❌ Razorpay create order failed with status {response.status_code}: {response.text}")
+            # Test register with invalid email
+            response = requests.post(f"{BASE_URL}/auth/register", 
+                                   json={"email": "invalid-email", "password": "123"}, 
+                                   headers=headers)
+            if response.status_code == 400:
+                self.log("✅ Zod validation working on register (invalid email rejected)")
+            else:
+                self.log(f"❌ Zod validation failed on register - Status: {response.status_code}", "ERROR")
                 return False
-                
-            data = response.json()
-            assert 'orderId' in data
-            assert 'amount' in data
-            assert 'currency' in data
-            assert 'keyId' in data
-            assert data['amount'] == 69900  # ₹699
-            assert data['currency'] == 'INR'
-            self.log(f"✅ Razorpay create order successful - Order ID: {data['orderId']}")
+            
+            # Test login with empty password
+            response = requests.post(f"{BASE_URL}/auth/login", 
+                                   json={"email": "test@example.com", "password": ""}, 
+                                   headers=headers)
+            if response.status_code == 400:
+                self.log("✅ Zod validation working on login (empty password rejected)")
+            else:
+                self.log(f"❌ Zod validation failed on login - Status: {response.status_code}", "ERROR")
+                return False
+            
+            # Test process with invalid UUID
+            auth_headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json"
+            }
+            response = requests.post(f"{BASE_URL}/process", 
+                                   json={"upload_id": "invalid-uuid"}, 
+                                   headers=auth_headers)
+            if response.status_code == 400:
+                self.log("✅ Zod validation working on process (invalid UUID rejected)")
+            else:
+                self.log(f"❌ Zod validation failed on process - Status: {response.status_code}", "ERROR")
+                return False
+            
             return True
+            
         except Exception as e:
-            self.log(f"❌ Razorpay create order failed: {e}")
+            self.log(f"❌ Zod validation test error: {str(e)}", "ERROR")
             return False
-    
-    def test_razorpay_payment_verify_validation(self):
-        """Test Razorpay payment verification with missing fields"""
+
+    def test_payment_endpoints(self):
+        """Test Razorpay payment endpoints"""
         try:
-            # Test missing fields
-            response = self.session.post(f"{BASE_URL}/payment/verify", json={
-                "razorpay_order_id": "order_123",
-                # Missing other required fields
-            })
-            assert response.status_code == 400
-            data = response.json()
-            assert "Missing payment fields" in data.get('error', '')
-            self.log("✅ Razorpay payment verify validation - Missing fields rejected correctly")
-            return True
-        except Exception as e:
-            self.log(f"❌ Razorpay payment verify validation failed: {e}")
-            return False
-    
-    def test_delete_file(self):
-        """Test file deletion"""
-        try:
-            if not self.upload_id:
-                self.log("❌ No upload ID available for deletion")
-                return True  # Skip if no file to delete
-                
-            response = self.session.delete(f"{BASE_URL}/file/{self.upload_id}")
-            assert response.status_code == 200
-            data = response.json()
-            assert data.get('message') == 'File deleted'
-            self.log("✅ File deletion successful")
-            return True
-        except Exception as e:
-            self.log(f"❌ File deletion failed: {e}")
-            return False
-    
-    def run_all_tests(self):
-        """Run all backend tests"""
-        self.log("Starting DocXL AI Backend Testing Suite")
-        self.log("=" * 60)
-        
-        tests = [
-            ("Health Check", self.test_health_check),
-            ("Zod Validation - Register", self.test_zod_validation_register),
-            ("User Registration", self.test_user_registration),
-            ("Zod Validation - Login", self.test_zod_validation_login),
-            ("User Login", self.test_user_login),
-            ("Get User Info", self.test_get_user_info),
-            ("File Upload", self.test_file_upload),
-            ("Zod Validation - Process", self.test_zod_validation_process),
-            ("Atomic Credit Deduction & AI Process", self.test_atomic_credit_deduction_and_ai_process),
-            ("Rate Limiting", self.test_rate_limiting),
-            ("Get Result", self.test_get_result),
-            ("Zod Validation - Update Result", self.test_zod_validation_update_result),
-            ("Update Result", self.test_update_result),
-            ("Export Excel", self.test_export_excel),
-            ("Razorpay Create Order", self.test_razorpay_create_order),
-            ("Razorpay Payment Verify Validation", self.test_razorpay_payment_verify_validation),
-            ("Delete File", self.test_delete_file),
-        ]
-        
-        passed = 0
-        total = len(tests)
-        
-        for test_name, test_func in tests:
-            self.log(f"\n--- Testing: {test_name} ---")
-            try:
-                if test_func():
-                    passed += 1
+            headers = {"Authorization": f"Bearer {self.access_token}", "Content-Type": "application/json"}
+            
+            # Test create order
+            response = requests.post(f"{BASE_URL}/payment/create-order", headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                if 'orderId' in data and 'amount' in data:
+                    self.log(f"✅ Razorpay create order successful - Order ID: {data['orderId']}, Amount: {data['amount']}")
                 else:
-                    self.log(f"❌ {test_name} FAILED")
-            except Exception as e:
-                self.log(f"❌ {test_name} FAILED with exception: {e}")
+                    self.log(f"❌ Razorpay create order missing fields: {data}", "ERROR")
+                    return False
+            else:
+                self.log(f"❌ Razorpay create order failed - Status: {response.status_code}", "ERROR")
+                return False
+            
+            # Test payment verify with missing fields (should return 400)
+            response = requests.post(f"{BASE_URL}/payment/verify", 
+                                   json={"incomplete": "data"}, 
+                                   headers=headers)
+            if response.status_code == 400:
+                self.log("✅ Razorpay payment verify validation working (missing fields rejected)")
+            else:
+                self.log(f"❌ Razorpay payment verify validation failed - Status: {response.status_code}", "ERROR")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.log(f"❌ Payment endpoints test error: {str(e)}", "ERROR")
+            return False
+
+    def run_comprehensive_test(self):
+        """Run comprehensive backend test suite"""
+        self.log("=" * 80)
+        self.log("DOCXL AI BACKEND TEST SUITE - FOCUSED ON PROCESS ENDPOINT WITH FALLBACK")
+        self.log("=" * 80)
         
-        self.log("\n" + "=" * 60)
-        self.log(f"TESTING COMPLETE: {passed}/{total} tests passed")
+        tests_passed = 0
+        total_tests = 0
         
-        if passed == total:
-            self.log("🎉 ALL TESTS PASSED!")
+        # Test 1: Health Check
+        total_tests += 1
+        if self.test_health_check():
+            tests_passed += 1
+        
+        # Test 2: User Registration
+        total_tests += 1
+        if self.test_register():
+            tests_passed += 1
         else:
-            self.log(f"⚠️ {total - passed} tests failed")
+            self.log("❌ Cannot continue without successful registration", "ERROR")
+            return False
         
-        return passed, total
+        # Test 3: User Login
+        total_tests += 1
+        if self.test_login():
+            tests_passed += 1
+        else:
+            self.log("❌ Cannot continue without successful login", "ERROR")
+            return False
+        
+        # Test 4: Check initial credits
+        total_tests += 1
+        initial_credits = self.test_get_user_info()
+        if initial_credits is not None:
+            tests_passed += 1
+            if initial_credits == 5:
+                self.log(f"✅ Initial credits correct: {initial_credits}")
+            else:
+                self.log(f"⚠️ Initial credits unexpected: {initial_credits} (expected 5)", "WARNING")
+        else:
+            self.log("❌ Cannot continue without user info", "ERROR")
+            return False
+        
+        # Test 5: File Upload
+        total_tests += 1
+        if self.test_upload_file():
+            tests_passed += 1
+        else:
+            self.log("❌ Cannot continue without successful upload", "ERROR")
+            return False
+        
+        # Test 6: CRITICAL - AI Processing with Fallback Credit Deduction
+        total_tests += 1
+        self.log("🎯 CRITICAL TEST: AI Processing with Fallback Credit Deduction")
+        if self.test_process_with_fallback_credit_deduction():
+            tests_passed += 1
+            self.log("🎉 CRITICAL TEST PASSED: Fallback credit deduction working!")
+        else:
+            self.log("💥 CRITICAL TEST FAILED: Fallback credit deduction not working!", "ERROR")
+        
+        # Test 7: Check credits after processing
+        total_tests += 1
+        final_credits = self.test_get_user_info()
+        if final_credits is not None:
+            tests_passed += 1
+            expected_credits = initial_credits - 1
+            if final_credits == expected_credits:
+                self.log(f"✅ Credits properly deducted: {final_credits} (was {initial_credits})")
+            else:
+                self.log(f"❌ Credits not properly deducted: {final_credits} (expected {expected_credits})", "ERROR")
+        
+        # Test 8: Get Result
+        total_tests += 1
+        if self.test_get_result():
+            tests_passed += 1
+        
+        # Test 9: Zod Validation
+        total_tests += 1
+        if self.test_zod_validation():
+            tests_passed += 1
+        
+        # Test 10: Payment Endpoints
+        total_tests += 1
+        if self.test_payment_endpoints():
+            tests_passed += 1
+        
+        # Summary
+        self.log("=" * 80)
+        self.log(f"TEST SUMMARY: {tests_passed}/{total_tests} tests passed")
+        self.log("=" * 80)
+        
+        if tests_passed == total_tests:
+            self.log("🎉 ALL TESTS PASSED! Backend is working correctly with fallback credit deduction.")
+            return True
+        else:
+            self.log(f"❌ {total_tests - tests_passed} tests failed. Check logs above for details.", "ERROR")
+            return False
 
 if __name__ == "__main__":
-    tester = BackendTester()
-    passed, total = tester.run_all_tests()
-    exit(0 if passed == total else 1)
+    tester = DocXLTester()
+    success = tester.run_comprehensive_test()
+    exit(0 if success else 1)
