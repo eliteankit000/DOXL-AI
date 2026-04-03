@@ -278,14 +278,92 @@ metadata:
 
 test_plan:
   current_focus:
-    - "All backend endpoints - Supabase migration verification"
-  stuck_tasks: []
+    - "Atomic Credit Deduction via RPC - needs Supabase function verification"
+  stuck_tasks:
+    - "Atomic Credit Deduction via RPC"
   test_all: false
   test_priority: "high_first"
 
+  - task: "Razorpay Payment - Create Order"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "POST /api/payment/create-order - creates Razorpay order for ₹699 Pro plan upgrade. Uses RAZORPAY_KEY_ID/SECRET from .env."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Razorpay create order successful. Fixed receipt length issue (was exceeding 40 char limit). Now generates orders correctly with amount ₹69900, currency INR."
+
+  - task: "Razorpay Payment - Verify"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "POST /api/payment/verify - verifies Razorpay signature, upgrades user to Pro with 300 credits."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Razorpay payment verify validation working. Correctly rejects requests with missing payment fields (400 status)."
+
+  - task: "Zod Validation on All Endpoints"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Added Zod schemas for register, login, process, updateResult. validate() helper returns 400 on failure."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Zod validation working on all endpoints. Register rejects invalid email/short password. Login rejects empty password. Process rejects invalid UUID. UpdateResult rejects invalid rows format."
+
+  - task: "Rate Limiting on Process"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Module-level rateLimitMap. checkRateLimit(userId, 5, 60000). Returns 429 with Retry-After header."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Rate limiting working correctly. Triggers 429 status with Retry-After header on 5th request within 60 seconds."
+
+  - task: "Atomic Credit Deduction via RPC"
+    implemented: true
+    working: false
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Uses supabase.rpc('deduct_credit_if_available'). SQL function already created in Supabase by user."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ TESTED: RPC function 'deduct_credit_if_available' exists but returns false even when user has 5 credits. Function may have bug or permission issue. Backend correctly handles RPC response but function logic needs verification in Supabase."
+
 agent_communication:
     - agent: "main"
-    - message: "COMPLETE SUPABASE MIGRATION. All APIs use Supabase (Auth + Storage + PostgreSQL). No MongoDB. Auth uses Supabase tokens. Register via admin.createUser, login via signInWithPassword. Files in Supabase Storage uploads bucket. Read /app/image_testing.md for image rules. Python script at /app/scripts/extract.py. EMERGENT_LLM_KEY in .env. Supabase credentials in .env."
+    - message: "MAJOR UPDATE: Added Zod validation, rate limiting, atomic credit deduction (Supabase RPC), temp file cleanup, safe error messages, Razorpay payment (create-order + verify), user_requirements passing to Python. Rewrote extract.py with 3-pass pipeline (detect→extract→validate). Created Footer, Privacy, Contact, Terms pages. Updated page.js with token refresh, RequirementsField, Razorpay checkout. RAZORPAY keys in .env. SQL function run by user. Test all existing endpoints still work + new payment endpoints."
     - agent: "testing"
     - message: "✅ BACKEND TESTING COMPLETE: All 11 backend endpoints tested successfully (13/13 tests passed). Supabase migration fully verified. Health check confirms Supabase backend. Auth flow working (register/login/me). File upload to Supabase Storage working. AI processing extracts data correctly and deducts credits. Excel export generates proper xlsx files. CRUD operations on uploads/results working. All endpoints use proper Supabase authentication. No critical issues found."
+    - agent: "testing"
+    - message: "✅ NEW FEATURES TESTED: 16/17 tests passed. Zod validation working on all endpoints (register/login/process/updateResult). Rate limiting triggers correctly on 5th request. Razorpay payment integration working (fixed receipt length issue). ❌ ISSUE FOUND: RPC function 'deduct_credit_if_available' returns false even when user has credits - needs verification in Supabase SQL editor."
 

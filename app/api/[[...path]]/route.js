@@ -1,19 +1,104 @@
+/*
+ * ═══════════════════════════════════════════════════════════════════
+ * SUPABASE SQL — Run this ONCE in Supabase SQL Editor before deploy:
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ * CREATE OR REPLACE FUNCTION deduct_credit_if_available(user_uuid UUID)
+ * RETURNS BOOLEAN AS $$
+ * DECLARE
+ *   current_credits INTEGER;
+ * BEGIN
+ *   SELECT credits INTO current_credits
+ *   FROM profiles
+ *   WHERE id = user_uuid
+ *   FOR UPDATE;
+ *   IF current_credits IS NULL OR current_credits <= 0 THEN
+ *     RETURN FALSE;
+ *   END IF;
+ *   UPDATE profiles SET credits = credits - 1 WHERE id = user_uuid;
+ *   RETURN TRUE;
+ * END;
+ * $$ LANGUAGE plpgsql SECURITY DEFINER;
+ *
+ * ═══════════════════════════════════════════════════════════════════
+ */
+
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, getAuthUser, getUserProfile } from '@/lib/supabase-server';
 import { writeFile, unlink, mkdir, access } from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { z } from 'zod';
 
 const execAsync = promisify(exec);
 const TEMP_DIR = '/tmp/docxl_processing';
 
-// Ensure temp directory exists
+// =============================================
+// ZOD VALIDATION SCHEMAS
+// =============================================
+
+const registerSchema = z.object({
+  email: z.string().email('Invalid email'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  name: z.string().optional(),
+});
+
+const loginSchema = z.object({
+  email: z.string().email('Invalid email'),
+  password: z.string().min(1, 'Password required'),
+});
+
+const processSchema = z.object({
+  upload_id: z.string().uuid('Invalid upload ID'),
+  user_requirements: z.string().max(500).optional(),
+});
+
+const updateResultSchema = z.object({
+  rows: z.array(z.object({
+    date: z.string().optional(),
+    description: z.string().optional(),
+    amount: z.number().optional(),
+    type: z.string().optional(),
+    category: z.string().optional(),
+    gst: z.number().optional(),
+    reference: z.string().optional(),
+  })),
+});
+
+function validate(schema, data) {
+  const result = schema.safeParse(data);
+  if (!result.success) return { error: result.error.errors[0].message, data: null };
+  return { error: null, data: result.data };
+}
+
+// =============================================
+// RATE LIMITING (module-level, no packages)
+// =============================================
+
+const rateLimitMap = new Map();
+
+function checkRateLimit(userId, maxRequests = 5, windowMs = 60000) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(userId) || { count: 0, windowStart: now };
+  if (now - entry.windowStart > windowMs) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  if (entry.count >= maxRequests) return false;
+  entry.count++;
+  rateLimitMap.set(userId, entry);
+  return true;
+}
+
+// =============================================
+// HELPERS
+// =============================================
+
 async function ensureTempDir() {
   try { await access(TEMP_DIR); } catch { await mkdir(TEMP_DIR, { recursive: true }); }
 }
 
-// CORS headers
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -27,14 +112,18 @@ function jsonResponse(body, status = 200) {
 }
 
 // =============================================
-// AUTH HANDLERS (Supabase Auth - no more JWT/bcrypt)
+// AUTH HANDLERS
 // =============================================
 
 async function handleRegister(request) {
   try {
     const body = await request.json();
-    const { email, password, name } = body;
-    if (!email || !password) return jsonResponse({ error: 'Email and password required' }, 400);
+    const validationResult = validate(registerSchema, body);
+    if (validationResult.error) {
+      return jsonResponse({ error: validationResult.error }, 400);
+    }
+
+    const { email, password, name } = validationResult.data;
 
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.auth.admin.createUser({
@@ -48,18 +137,10 @@ async function handleRegister(request) {
       if (error.message?.includes('already been registered') || error.message?.includes('already exists')) {
         return jsonResponse({ error: 'Email already registered' }, 409);
       }
-      return jsonResponse({ error: error.message }, 400);
+      console.error('[handleRegister] error:', error);
+      return jsonResponse({ error: 'Registration failed. Please try again.' }, 400);
     }
 
-    // Generate a session token for the new user
-    const { data: signInData, error: signInError } = await supabase.auth.admin.generateLink({
-      type: 'magiclink',
-      email: email.toLowerCase(),
-    });
-
-    // Sign in the user to get a session
-    // We use admin.createUser with email_confirm:true so the user can sign in immediately
-    // The frontend will sign in right after register
     const profile = await getUserProfile(data.user.id);
 
     return jsonResponse({
@@ -73,20 +154,22 @@ async function handleRegister(request) {
       message: 'Account created. Please sign in.',
     }, 201);
   } catch (error) {
-    console.error('Register error:', error);
-    return jsonResponse({ error: 'Registration failed' }, 500);
+    console.error('[handleRegister] error:', error);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
 async function handleLogin(request) {
   try {
     const body = await request.json();
-    const { email, password } = body;
-    if (!email || !password) return jsonResponse({ error: 'Email and password required' }, 400);
+    const validationResult = validate(loginSchema, body);
+    if (validationResult.error) {
+      return jsonResponse({ error: validationResult.error }, 400);
+    }
+
+    const { email, password } = validationResult.data;
 
     const supabase = getSupabaseAdmin();
-
-    // Use the anon client approach: create a temporary client to sign in
     const { createClient } = await import('@supabase/supabase-js');
     const anonClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -117,8 +200,8 @@ async function handleLogin(request) {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
-    return jsonResponse({ error: 'Login failed' }, 500);
+    console.error('[handleLogin] error:', error);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
@@ -177,7 +260,6 @@ async function handleUpload(request) {
 
     const supabase = getSupabaseAdmin();
 
-    // Upload to Supabase Storage
     const { data: storageData, error: storageError } = await supabase.storage
       .from('uploads')
       .upload(storagePath, buffer, {
@@ -186,16 +268,14 @@ async function handleUpload(request) {
       });
 
     if (storageError) {
-      console.error('Storage upload error:', storageError);
-      return jsonResponse({ error: 'File upload failed: ' + storageError.message }, 500);
+      console.error('[handleUpload] storage error:', storageError);
+      return jsonResponse({ error: 'Upload failed. Please try again.' }, 500);
     }
 
-    // Determine file type
     let fileType = 'other';
     if (ext === '.pdf') fileType = 'invoice';
     else fileType = 'image';
 
-    // Insert upload record
     const { data: uploadRecord, error: dbError } = await supabase
       .from('uploads')
       .insert({
@@ -211,8 +291,7 @@ async function handleUpload(request) {
       .single();
 
     if (dbError) {
-      console.error('DB insert error:', dbError);
-      // Cleanup storage
+      console.error('[handleUpload] db error:', dbError);
       await supabase.storage.from('uploads').remove([storagePath]);
       return jsonResponse({ error: 'Failed to create upload record' }, 500);
     }
@@ -227,8 +306,8 @@ async function handleUpload(request) {
       },
     }, 201);
   } catch (error) {
-    console.error('Upload error:', error);
-    return jsonResponse({ error: 'Upload failed: ' + error.message }, 500);
+    console.error('[handleUpload] error:', error);
+    return jsonResponse({ error: 'Upload failed. Please try again.' }, 500);
   }
 }
 
@@ -242,10 +321,28 @@ async function handleProcess(request) {
     if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
 
     const body = await request.json();
-    const { upload_id } = body;
-    if (!upload_id) return jsonResponse({ error: 'upload_id required' }, 400);
+    const validationResult = validate(processSchema, body);
+    if (validationResult.error) {
+      return jsonResponse({ error: validationResult.error }, 400);
+    }
+
+    const { upload_id, user_requirements = '' } = validationResult.data;
+
+    // Rate limit check
+    if (!checkRateLimit(user.id)) {
+      return new NextResponse(JSON.stringify({ error: 'Too many requests. Please wait a minute.' }), {
+        status: 429,
+        headers: { ...corsHeaders(), 'Retry-After': '60', 'Content-Type': 'application/json' },
+      });
+    }
 
     const supabase = getSupabaseAdmin();
+
+    // Atomic credit deduction via Supabase RPC
+    const { data: canProcess, error: rpcError } = await supabase.rpc('deduct_credit_if_available', { user_uuid: user.id });
+    if (rpcError || !canProcess) {
+      return jsonResponse({ error: 'No credits remaining. Please upgrade to Pro.' }, 403);
+    }
 
     // Fetch upload record
     const { data: upload, error: fetchErr } = await supabase
@@ -261,6 +358,7 @@ async function handleProcess(request) {
     // Set status to processing
     await supabase.from('uploads').update({ status: 'processing' }).eq('id', upload_id);
 
+    let tempFilePath = null;
     try {
       // Download file from Supabase Storage to temp
       const { data: fileBlob, error: dlErr } = await supabase.storage
@@ -268,24 +366,35 @@ async function handleProcess(request) {
         .download(upload.file_path);
 
       if (dlErr || !fileBlob) {
-        throw new Error('Failed to download file from storage: ' + (dlErr?.message || 'unknown'));
+        throw new Error('Failed to download file from storage');
       }
 
       await ensureTempDir();
-      const tempFilePath = path.join(TEMP_DIR, `${upload_id}${path.extname(upload.file_name)}`);
+
+      // Stale file cleanup
+      try {
+        const { readdir, stat } = await import('fs/promises');
+        const tmpFiles = await readdir(TEMP_DIR);
+        const now = Date.now();
+        for (const f of tmpFiles) {
+          const fp = path.join(TEMP_DIR, f);
+          const s = await stat(fp);
+          if (now - s.mtimeMs > 3600000) await unlink(fp).catch(() => {});
+        }
+      } catch (e) {}
+
+      tempFilePath = path.join(TEMP_DIR, `${upload_id}${path.extname(upload.file_name)}`);
       const fileBuffer = Buffer.from(await fileBlob.arrayBuffer());
       await writeFile(tempFilePath, fileBuffer);
 
-      // Call Python extraction script
+      // Call Python extraction script with user_requirements
+      const escapedReqs = (user_requirements || '').replace(/"/g, '\\"').replace(/`/g, '\\`');
       const { stdout, stderr } = await execAsync(
-        `cd /app && EMERGENT_LLM_KEY="${process.env.EMERGENT_LLM_KEY}" /root/.venv/bin/python3 scripts/extract.py "${tempFilePath}"`,
+        `cd /app && EMERGENT_LLM_KEY="${process.env.EMERGENT_LLM_KEY}" /root/.venv/bin/python3 scripts/extract.py "${tempFilePath}" "${escapedReqs}"`,
         { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }
       );
 
-      // Cleanup temp file
-      try { await unlink(tempFilePath); } catch (e) { /* ignore */ }
-
-      if (stderr) console.error('Extract stderr:', stderr);
+      if (stderr) console.error('[handleProcess] extract stderr:', stderr);
 
       let result;
       try {
@@ -296,7 +405,11 @@ async function handleProcess(request) {
 
       if (result.error) {
         await supabase.from('uploads').update({ status: 'failed', error_message: result.error }).eq('id', upload_id);
-        return jsonResponse({ error: result.error }, 422);
+        // Only pass error through if it does NOT contain a file path
+        const safeError = /[/\\]/.test(result.error)
+          ? 'Could not extract data from this document. Please try a clearer image or PDF.'
+          : result.error;
+        return jsonResponse({ error: safeError }, 422);
       }
 
       // Normalize rows
@@ -324,27 +437,18 @@ async function handleProcess(request) {
           document_type: result.document_type || 'other',
           structured_json: { rows: normalizedRows },
           summary,
-          confidence_score: 0.85,
+          confidence_score: result.confidence || 0.85,
         })
         .select()
         .single();
 
       if (resultErr) {
-        console.error('Result insert error:', resultErr);
+        console.error('[handleProcess] result insert error:', resultErr);
         throw new Error('Failed to save extraction result');
       }
 
       // Update upload status
       await supabase.from('uploads').update({ status: 'completed' }).eq('id', upload_id);
-
-      // Deduct credit
-      const profile = await getUserProfile(user.id);
-      if (profile) {
-        await supabase
-          .from('profiles')
-          .update({ credits: Math.max(0, profile.credits - 1) })
-          .eq('id', user.id);
-      }
 
       // Log usage
       await supabase.from('usage_logs').insert({
@@ -365,16 +469,17 @@ async function handleProcess(request) {
         },
       });
     } catch (execError) {
-      console.error('Extraction error:', execError);
-      await supabase.from('uploads').update({
-        status: 'failed',
-        error_message: execError.message,
-      }).eq('id', upload_id);
-      return jsonResponse({ error: 'AI extraction failed: ' + execError.message }, 500);
+      console.error('[handleProcess] extraction error:', execError);
+      await supabase.from('uploads').update({ status: 'failed', error_message: 'Processing failed' }).eq('id', upload_id);
+      return jsonResponse({ error: 'Document processing failed. Please try again or use a clearer image.' }, 500);
+    } finally {
+      if (tempFilePath) {
+        try { await unlink(tempFilePath); } catch (e) {}
+      }
     }
   } catch (error) {
-    console.error('Process error:', error);
-    return jsonResponse({ error: 'Processing failed' }, 500);
+    console.error('[handleProcess] error:', error);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
@@ -389,7 +494,6 @@ async function handleGetResult(request, id) {
 
     const supabase = getSupabaseAdmin();
 
-    // Try by result id first, then by upload_id
     let { data: resultData } = await supabase
       .from('results')
       .select('*, uploads!inner(user_id, file_name)')
@@ -423,8 +527,8 @@ async function handleGetResult(request, id) {
       },
     });
   } catch (error) {
-    console.error('Get result error:', error);
-    return jsonResponse({ error: 'Failed to get result' }, 500);
+    console.error('[handleGetResult] error:', error);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
@@ -449,8 +553,8 @@ async function handleGetUploads(request) {
 
     return jsonResponse({ uploads: uploads || [] });
   } catch (error) {
-    console.error('Get uploads error:', error);
-    return jsonResponse({ error: 'Failed to get uploads' }, 500);
+    console.error('[handleGetUploads] error:', error);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
@@ -474,21 +578,17 @@ async function handleDeleteFile(request, id) {
 
     if (!upload) return jsonResponse({ error: 'File not found' }, 404);
 
-    // Delete from Supabase Storage
     if (upload.file_path) {
       await supabase.storage.from('uploads').remove([upload.file_path]);
     }
 
-    // Delete results
     await supabase.from('results').delete().eq('upload_id', id);
-
-    // Delete upload record
     await supabase.from('uploads').delete().eq('id', id);
 
     return jsonResponse({ message: 'File deleted' });
   } catch (error) {
-    console.error('Delete file error:', error);
-    return jsonResponse({ error: 'Delete failed' }, 500);
+    console.error('[handleDeleteFile] error:', error);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
@@ -502,12 +602,14 @@ async function handleUpdateResult(request, id) {
     if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
 
     const body = await request.json();
-    const { rows } = body;
-    if (!rows) return jsonResponse({ error: 'rows required' }, 400);
+    const validationResult = validate(updateResultSchema, body);
+    if (validationResult.error) {
+      return jsonResponse({ error: validationResult.error }, 400);
+    }
 
+    const { rows } = validationResult.data;
     const supabase = getSupabaseAdmin();
 
-    // Find result and verify ownership
     let { data: resultData } = await supabase
       .from('results')
       .select('*, uploads!inner(user_id)')
@@ -536,8 +638,8 @@ async function handleUpdateResult(request, id) {
 
     return jsonResponse({ message: 'Updated successfully' });
   } catch (error) {
-    console.error('Update result error:', error);
-    return jsonResponse({ error: 'Update failed' }, 500);
+    console.error('[handleUpdateResult] error:', error);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
@@ -615,7 +717,6 @@ async function handleExportExcel(request, id) {
     });
     summaryRow.font = { bold: true };
 
-    // Log export usage
     await supabase.from('usage_logs').insert({
       user_id: user.id,
       action: 'export',
@@ -634,8 +735,59 @@ async function handleExportExcel(request, id) {
       },
     });
   } catch (error) {
-    console.error('Export error:', error);
-    return jsonResponse({ error: 'Export failed: ' + error.message }, 500);
+    console.error('[handleExportExcel] error:', error);
+    return jsonResponse({ error: 'Export failed. Please try again.' }, 500);
+  }
+}
+
+// =============================================
+// RAZORPAY PAYMENT HANDLERS
+// =============================================
+
+async function handleCreateOrder(request) {
+  const user = await getAuthUser(request);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+  try {
+    const Razorpay = (await import('razorpay')).default;
+    const rzp = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+    const order = await rzp.orders.create({
+      amount: 69900,
+      currency: 'INR',
+      receipt: `docxl_${Date.now().toString().slice(-8)}`,
+    });
+    return jsonResponse({
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+    });
+  } catch (error) {
+    console.error('[handleCreateOrder] error:', error);
+    return jsonResponse({ error: 'Could not initiate payment. Please try again.' }, 500);
+  }
+}
+
+async function handlePaymentVerify(request) {
+  try {
+    const body = await request.json();
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, user_id } = body;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !user_id) {
+      return jsonResponse({ error: 'Missing payment fields' }, 400);
+    }
+    const crypto = await import('crypto');
+    const expectedSig = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
+    if (expectedSig !== razorpay_signature) return jsonResponse({ error: 'Invalid payment signature' }, 400);
+    const supabase = getSupabaseAdmin();
+    await supabase.from('profiles').update({ plan: 'pro', credits: 300 }).eq('id', user_id);
+    await supabase.from('usage_logs').insert({ user_id, action: 'upgrade', credits_used: 0, upload_id: null });
+    return jsonResponse({ success: true });
+  } catch (error) {
+    console.error('[handlePaymentVerify] error:', error);
+    return jsonResponse({ error: 'Payment verification failed.' }, 500);
   }
 }
 
@@ -668,6 +820,8 @@ export async function POST(request, context) {
   if (routePath === 'auth/login') return handleLogin(request);
   if (routePath === 'upload') return handleUpload(request);
   if (routePath === 'process') return handleProcess(request);
+  if (routePath === 'payment/create-order') return handleCreateOrder(request);
+  if (routePath === 'payment/verify') return handlePaymentVerify(request);
 
   return jsonResponse({ error: 'Not found' }, 404);
 }

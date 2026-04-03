@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -9,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import Footer from '@/components/Footer';
 import {
   FileSpreadsheet, Upload, Zap, Shield, ArrowRight, Check, X, Loader2,
   Download, Trash2, Eye, History, CreditCard, LogOut, Menu,
@@ -24,17 +26,38 @@ const supabase = createClient(
 
 const API_BASE = '/api';
 
-// Helper: API call with Supabase auth token
+// Helper: API call with Supabase auth token (with token refresh)
 const apiFetch = async (url, options = {}) => {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
+  const { data: { session: freshSession } } = await supabase.auth.getSession();
+  const token = freshSession?.access_token;
   const headers = { ...options.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (!(options.body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
+  if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+  const response = await fetch(`${API_BASE}${url}`, { ...options, headers });
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent('auth:expired'));
   }
-  return fetch(`${API_BASE}${url}`, { ...options, headers });
+  return response;
 };
+
+// ============= REQUIREMENTS FIELD =============
+const RequirementsField = ({ value, onChange }) => (
+  <div className="space-y-2">
+    <Label htmlFor="requirements" className="text-sm font-medium">
+      What should we extract? <span className="text-muted-foreground font-normal">(optional)</span>
+    </Label>
+    <textarea
+      id="requirements"
+      className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+      placeholder="e.g. Extract all transactions above ₹1000 with GST breakdown, or get invoice line items grouped by category"
+      rows={2}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      maxLength={500}
+    />
+    <p className="text-xs text-muted-foreground">{value.length}/500 — Describe what matters to you and the AI will prioritize those fields</p>
+  </div>
+);
 
 // ============= LANDING PAGE =============
 const LandingPage = ({ onGetStarted }) => (
@@ -49,6 +72,8 @@ const LandingPage = ({ onGetStarted }) => (
             <span className="text-xl font-bold text-foreground">DocXL AI</span>
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors hidden sm:inline">Privacy</Link>
+            <Link href="/contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors hidden sm:inline">Contact</Link>
             <Button variant="ghost" onClick={() => onGetStarted('login')}>Sign In</Button>
             <Button onClick={() => onGetStarted('register')}>Get Started Free</Button>
           </div>
@@ -81,7 +106,7 @@ const LandingPage = ({ onGetStarted }) => (
       </div>
     </section>
 
-    <section className="py-20 bg-white">
+    <section id="how-it-works" className="py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <h2 className="text-3xl font-bold text-center mb-4">How It Works</h2>
         <p className="text-muted-foreground text-center mb-12 max-w-xl mx-auto">Three simple steps to convert any document into structured data</p>
@@ -169,17 +194,7 @@ const LandingPage = ({ onGetStarted }) => (
       </div>
     </section>
 
-    <footer className="py-12 border-t">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        <div className="flex items-center justify-center gap-2 mb-4">
-          <div className="w-6 h-6 bg-primary rounded flex items-center justify-center">
-            <FileSpreadsheet className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-bold">DocXL AI</span>
-        </div>
-        <p className="text-sm text-muted-foreground">Transform documents into structured data with AI. Fast, secure, accurate.</p>
-      </div>
-    </footer>
+    <Footer />
   </div>
 );
 
@@ -200,7 +215,6 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
 
     try {
       if (mode === 'register') {
-        // Register via API (creates user + profile via trigger)
         const res = await fetch(`${API_BASE}/auth/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -209,7 +223,6 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
         const data = await res.json();
         if (!res.ok) { setError(data.error || 'Registration failed'); return; }
 
-        // Now sign in with Supabase client to get session
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: email.toLowerCase(),
           password,
@@ -217,18 +230,16 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
 
         if (signInError) {
           setMessage('Account created! Please sign in.');
-          onSwitch(); // Switch to login
+          onSwitch();
           return;
         }
 
-        // Get profile
         const meRes = await fetch(`${API_BASE}/auth/me`, {
           headers: { 'Authorization': `Bearer ${signInData.session.access_token}` },
         });
         const meData = await meRes.json();
         onSuccess(meData.user || data.user, signInData.session);
       } else {
-        // Login via Supabase client directly
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: email.toLowerCase(),
           password,
@@ -239,7 +250,6 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
           return;
         }
 
-        // Get profile from API
         const meRes = await fetch(`${API_BASE}/auth/me`, {
           headers: { 'Authorization': `Bearer ${signInData.session.access_token}` },
         });
@@ -385,7 +395,7 @@ const UploadBox = ({ onUploadComplete, disabled }) => {
       setUploadProgress(100);
       setTimeout(() => onUploadComplete(data.upload), 500);
     } catch (err) {
-      setError('Upload failed: ' + err.message);
+      setError('Upload failed. Please try again.');
     } finally {
       setTimeout(() => { setUploading(false); setUploadProgress(0); }, 1000);
     }
@@ -446,7 +456,13 @@ const ProcessingView = ({ upload, onComplete, onError }) => {
       if (cancelled) return;
       setStep(1);
       try {
-        const res = await apiFetch('/process', { method: 'POST', body: JSON.stringify({ upload_id: upload.id }) });
+        const res = await apiFetch('/process', {
+          method: 'POST',
+          body: JSON.stringify({
+            upload_id: upload.id,
+            user_requirements: upload.userRequirements || '',
+          }),
+        });
         const data = await res.json();
         if (!res.ok) { setError(data.error || 'Processing failed'); if (onError) onError(data.error); return; }
         if (cancelled) return;
@@ -455,7 +471,7 @@ const ProcessingView = ({ upload, onComplete, onError }) => {
         if (cancelled) return;
         onComplete(data.result);
       } catch (err) {
-        setError('Processing failed: ' + err.message);
+        setError('Processing failed. Please try again.');
         if (onError) onError(err.message);
       }
     };
@@ -657,7 +673,7 @@ const ResultView = ({ result, onBack }) => {
 };
 
 // ============= DASHBOARD VIEW =============
-const DashboardView = ({ user, onUploadComplete, uploads, onViewResult, onRefresh }) => (
+const DashboardView = ({ user, onUploadComplete, uploads, onViewResult, onRefresh, userRequirements, onRequirementsChange }) => (
   <div className="space-y-8 animate-fade-in">
     <div>
       <h1 className="text-3xl font-bold">Welcome, {user?.name || 'there'}!</h1>
@@ -668,6 +684,7 @@ const DashboardView = ({ user, onUploadComplete, uploads, onViewResult, onRefres
       <Card><CardContent className="pt-4 pb-4"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center"><FileSpreadsheet className="w-5 h-5 text-green-500" /></div><div><p className="text-sm text-muted-foreground">Files Processed</p><p className="text-xl font-bold">{uploads?.filter(u => u.status === 'completed').length || 0}</p></div></div></CardContent></Card>
       <Card><CardContent className="pt-4 pb-4"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-orange-500/10 rounded-lg flex items-center justify-center"><Zap className="w-5 h-5 text-orange-500" /></div><div><p className="text-sm text-muted-foreground">Plan</p><p className="text-xl font-bold capitalize">{user?.plan || 'free'}</p></div></div></CardContent></Card>
     </div>
+    <RequirementsField value={userRequirements} onChange={onRequirementsChange} />
     <UploadBox onUploadComplete={onUploadComplete} disabled={(user?.credits_remaining ?? 0) <= 0} />
     {(user?.credits_remaining ?? 0) <= 0 && (
       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
@@ -748,7 +765,7 @@ const HistoryView = ({ uploads, onViewResult, onDelete, onRefresh }) => (
 );
 
 // ============= PRICING VIEW =============
-const PricingView = ({ user }) => (
+const PricingView = ({ user, onUpgrade }) => (
   <div className="space-y-8 animate-fade-in">
     <div className="text-center"><h2 className="text-3xl font-bold">Upgrade Your Plan</h2><p className="text-muted-foreground mt-2">Get more extractions with DocXL Pro</p></div>
     <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
@@ -769,8 +786,8 @@ const PricingView = ({ user }) => (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2"><Badge className="bg-primary">Recommended</Badge></div>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">Pro {user?.plan === 'pro' && <Badge>Active</Badge>}</CardTitle>
-          <div className="text-3xl font-bold mt-4">$9<span className="text-lg font-normal text-muted-foreground">/month</span></div>
-          <p className="text-sm text-muted-foreground">or &#x20B9;699/month for India</p>
+          <div className="text-3xl font-bold mt-4">&#x20B9;699<span className="text-lg font-normal text-muted-foreground">/month</span></div>
+          <p className="text-sm text-muted-foreground">~$9/month</p>
         </CardHeader>
         <CardContent>
           <ul className="space-y-3">
@@ -778,7 +795,11 @@ const PricingView = ({ user }) => (
               <li key={i} className="flex items-center gap-2 text-sm"><Check className="w-4 h-4 text-green-500" />{f}</li>
             ))}
           </ul>
-          {user?.plan !== 'pro' && <Button className="w-full mt-6">Upgrade to Pro</Button>}
+          {user?.plan !== 'pro' && (
+            <Button className="w-full mt-6" onClick={onUpgrade}>
+              Upgrade to Pro — &#x20B9;699/month
+            </Button>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -796,15 +817,20 @@ const App = () => {
   const [currentResult, setCurrentResult] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [userRequirements, setUserRequirements] = useState('');
 
-  // Check Supabase auth on mount
+  // Check Supabase auth on mount + load Razorpay
   useEffect(() => {
+    // Load Razorpay script
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    document.body.appendChild(script);
+
     const checkSession = async () => {
       try {
         const { data: { session: existingSession } } = await supabase.auth.getSession();
         if (existingSession) {
           setSession(existingSession);
-          // Fetch profile
           const res = await fetch(`${API_BASE}/auth/me`, {
             headers: { 'Authorization': `Bearer ${existingSession.access_token}` },
           });
@@ -838,12 +864,25 @@ const App = () => {
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Listen for auth expired events
+    const handleAuthExpired = () => {
+      setUser(null);
+      setSession(null);
+      setUploads([]);
+      setView('landing');
+    };
+    window.addEventListener('auth:expired', handleAuthExpired);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('auth:expired', handleAuthExpired);
+    };
   }, []);
 
   const fetchUploads = async (token) => {
     try {
-      const accessToken = token || session?.access_token;
+      const { data: { session: freshSession } } = await supabase.auth.getSession();
+      const accessToken = token || freshSession?.access_token;
       if (!accessToken) return;
       const res = await fetch(`${API_BASE}/uploads`, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
@@ -886,7 +925,10 @@ const App = () => {
     setView('landing');
   };
 
-  const handleUploadComplete = (upload) => { setCurrentUpload(upload); setView('processing'); };
+  const handleUploadComplete = (upload) => {
+    setCurrentUpload({ ...upload, userRequirements });
+    setView('processing');
+  };
 
   const handleProcessComplete = (result) => {
     setCurrentResult(result);
@@ -913,6 +955,41 @@ const App = () => {
     } catch (err) { console.error('Delete error:', err); }
   };
 
+  const handleUpgrade = async () => {
+    try {
+      const res = await apiFetch('/payment/create-order', { method: 'POST' });
+      if (!res.ok) { alert('Could not start payment. Please try again.'); return; }
+      const { orderId, amount, currency, keyId } = await res.json();
+      if (!window.Razorpay) { alert('Payment system loading, please try again in a moment.'); return; }
+      const rzp = new window.Razorpay({
+        key: keyId,
+        amount,
+        currency,
+        order_id: orderId,
+        name: 'DocXL AI',
+        description: 'Pro Plan — 300 extractions/month',
+        prefill: { email: user?.email || '' },
+        theme: { color: '#1D4ED8' },
+        handler: async (response) => {
+          const verifyRes = await apiFetch('/payment/verify', {
+            method: 'POST',
+            body: JSON.stringify({ ...response, user_id: user.id }),
+          });
+          if (verifyRes.ok) {
+            await refreshUser();
+            alert('You are now on Pro! 300 credits have been added.');
+          } else {
+            alert('Payment received but activation failed. Please contact support.');
+          }
+        },
+      });
+      rzp.open();
+    } catch (err) {
+      console.error('Upgrade error:', err);
+      alert('Something went wrong. Please try again.');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -932,12 +1009,28 @@ const App = () => {
       <Sidebar user={user} currentView={view} onNavigate={setView} onLogout={handleLogout} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-6xl mx-auto p-6 lg:p-8">
-          {view === 'dashboard' && <DashboardView user={user} uploads={uploads} onUploadComplete={handleUploadComplete} onViewResult={handleViewResult} onRefresh={() => fetchUploads()} />}
-          {view === 'upload' && <div className="space-y-6 animate-fade-in"><h2 className="text-2xl font-bold">Upload Document</h2><UploadBox onUploadComplete={handleUploadComplete} disabled={(user?.credits_remaining ?? 0) <= 0} /></div>}
+          {view === 'dashboard' && (
+            <DashboardView
+              user={user}
+              uploads={uploads}
+              onUploadComplete={handleUploadComplete}
+              onViewResult={handleViewResult}
+              onRefresh={() => fetchUploads()}
+              userRequirements={userRequirements}
+              onRequirementsChange={setUserRequirements}
+            />
+          )}
+          {view === 'upload' && (
+            <div className="space-y-6 animate-fade-in">
+              <h2 className="text-2xl font-bold">Upload Document</h2>
+              <RequirementsField value={userRequirements} onChange={setUserRequirements} />
+              <UploadBox onUploadComplete={handleUploadComplete} disabled={(user?.credits_remaining ?? 0) <= 0} />
+            </div>
+          )}
           {view === 'processing' && <ProcessingView upload={currentUpload} onComplete={handleProcessComplete} onError={() => fetchUploads()} />}
           {view === 'result' && currentResult && <ResultView result={currentResult} onBack={() => { setView('dashboard'); fetchUploads(); }} />}
           {view === 'history' && <HistoryView uploads={uploads} onViewResult={handleViewResult} onDelete={handleDeleteUpload} onRefresh={() => fetchUploads()} />}
-          {view === 'pricing' && <PricingView user={user} onNavigate={setView} />}
+          {view === 'pricing' && <PricingView user={user} onUpgrade={handleUpgrade} />}
         </div>
       </main>
     </div>
