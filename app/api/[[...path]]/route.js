@@ -27,12 +27,16 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, getAuthUser, getUserProfile } from '@/lib/supabase-server';
 import { writeFile, unlink, mkdir, access } from 'fs/promises';
 import path from 'path';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { z } from 'zod';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const TEMP_DIR = '/tmp/docxl_processing';
+
+// Export config for Vercel serverless functions
+export const maxDuration = 300; // 5 minutes for AI processing
+export const runtime = 'nodejs';
 
 // =============================================
 // ZOD VALIDATION SCHEMAS
@@ -248,9 +252,9 @@ async function handleUpload(request) {
       return jsonResponse({ error: 'Invalid file type. Supported: PDF, JPG, PNG, WEBP' }, 400);
     }
 
-    const maxSize = 10 * 1024 * 1024;
+    const maxSize = 100 * 1024 * 1024; // 100MB
     if (file.size > maxSize) {
-      return jsonResponse({ error: 'File too large. Maximum 10MB allowed.' }, 400);
+      return jsonResponse({ error: 'File too large. Maximum 100MB allowed.' }, 400);
     }
 
     const bytes = await file.arrayBuffer();
@@ -409,11 +413,16 @@ async function handleProcess(request) {
       const fileBuffer = Buffer.from(await fileBlob.arrayBuffer());
       await writeFile(tempFilePath, fileBuffer);
 
-      // Call Python extraction script with user_requirements
-      const escapedReqs = (user_requirements || '').replace(/"/g, '\\"').replace(/`/g, '\\`');
-      const { stdout, stderr } = await execAsync(
-        `cd /app && EMERGENT_LLM_KEY="${process.env.EMERGENT_LLM_KEY}" /root/.venv/bin/python3 scripts/extract.py "${tempFilePath}" "${escapedReqs}"`,
-        { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }
+      // Call Python extraction script with user_requirements (using execFile to prevent shell injection)
+      const { stdout, stderr } = await execFileAsync(
+        '/root/.venv/bin/python3',
+        ['scripts/extract.py', tempFilePath, user_requirements || ''],
+        {
+          cwd: '/app',
+          timeout: 120000,
+          maxBuffer: 10 * 1024 * 1024,
+          env: { ...process.env, OPENAI_API_KEY: process.env.OPENAI_API_KEY }
+        }
       );
 
       if (stderr) console.error('[handleProcess] extract stderr:', stderr);
@@ -493,7 +502,27 @@ async function handleProcess(request) {
     } catch (execError) {
       console.error('[handleProcess] extraction error:', execError);
       await supabase.from('uploads').update({ status: 'failed', error_message: 'Processing failed' }).eq('id', upload_id);
-      return jsonResponse({ error: 'Document processing failed. Please try again or use a clearer image.' }, 500);
+      
+      // Refund credit on timeout or processing failure
+      if (creditDeducted) {
+        const profile = await getUserProfile(user.id);
+        if (profile) {
+          await supabase.from('profiles').update({ credits: profile.credits + 1 }).eq('id', user.id);
+          await supabase.from('usage_logs').insert({
+            user_id: user.id,
+            action: 'timeout_refund',
+            credits_used: -1,
+            upload_id,
+          });
+        }
+      }
+      
+      // Check if timeout error
+      if (execError.killed || execError.signal === 'SIGTERM') {
+        return jsonResponse({ error: 'Processing timed out. Please try with a smaller or clearer document. Your credit has been refunded.' }, 408);
+      }
+      
+      return jsonResponse({ error: 'Document processing failed. Please try again or use a clearer image. Your credit has been refunded.' }, 500);
     } finally {
       if (tempFilePath) {
         try { await unlink(tempFilePath); } catch (e) {}
@@ -794,9 +823,13 @@ async function handleCreateOrder(request) {
 
 async function handlePaymentVerify(request) {
   try {
+    // SECURITY FIX: Extract user from JWT, don't trust user_id from frontend
+    const user = await getAuthUser(request);
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+    
     const body = await request.json();
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, user_id } = body;
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !user_id) {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return jsonResponse({ error: 'Missing payment fields' }, 400);
     }
     const crypto = await import('crypto');
@@ -804,12 +837,176 @@ async function handlePaymentVerify(request) {
       .update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
     if (expectedSig !== razorpay_signature) return jsonResponse({ error: 'Invalid payment signature' }, 400);
     const supabase = getSupabaseAdmin();
-    await supabase.from('profiles').update({ plan: 'pro', credits: 300 }).eq('id', user_id);
-    await supabase.from('usage_logs').insert({ user_id, action: 'upgrade', credits_used: 0, upload_id: null });
+    await supabase.from('profiles').update({ plan: 'pro', credits: 300 }).eq('id', user.id);
+    await supabase.from('usage_logs').insert({ user_id: user.id, action: 'upgrade', credits_used: 0, upload_id: null });
     return jsonResponse({ success: true });
   } catch (error) {
     console.error('[handlePaymentVerify] error:', error);
     return jsonResponse({ error: 'Payment verification failed.' }, 500);
+  }
+}
+
+// =============================================
+// PADDLE PAYMENT HANDLERS (GLOBAL)
+// =============================================
+
+async function handlePaddleCheckout(request) {
+  const user = await getAuthUser(request);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
+  
+  try {
+    // Check if Paddle is configured
+    if (!process.env.PADDLE_API_KEY || !process.env.PADDLE_PRICE_ID) {
+      return jsonResponse({ error: 'Paddle payment not configured. Please use Razorpay (India) or contact support.' }, 503);
+    }
+
+    // Return Paddle checkout data
+    return jsonResponse({
+      priceId: process.env.PADDLE_PRICE_ID,
+      customData: {
+        user_id: user.id,
+        email: user.email,
+      },
+    });
+  } catch (error) {
+    console.error('[handlePaddleCheckout] error:', error);
+    return jsonResponse({ error: 'Could not initiate payment. Please try again.' }, 500);
+  }
+}
+
+async function handlePaddleWebhook(request) {
+  try {
+    // Verify Paddle webhook signature
+    const signature = request.headers.get('paddle-signature');
+    if (!signature || !process.env.PADDLE_WEBHOOK_SECRET) {
+      return jsonResponse({ error: 'Invalid webhook' }, 401);
+    }
+
+    const body = await request.text();
+    const crypto = await import('crypto');
+    
+    // Parse signature header: ts=timestamp;h1=signature
+    const sigParts = signature.split(';').reduce((acc, part) => {
+      const [key, value] = part.split('=');
+      acc[key] = value;
+      return acc;
+    }, {});
+
+    const expectedSig = crypto.createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET)
+      .update(`${sigParts.ts}:${body}`)
+      .digest('hex');
+
+    if (expectedSig !== sigParts.h1) {
+      console.error('[handlePaddleWebhook] Invalid signature');
+      return jsonResponse({ error: 'Invalid signature' }, 401);
+    }
+
+    const event = JSON.parse(body);
+
+    // Handle transaction.completed event
+    if (event.event_type === 'transaction.completed') {
+      const userId = event.data?.custom_data?.user_id;
+      if (!userId) {
+        console.error('[handlePaddleWebhook] Missing user_id in custom_data');
+        return jsonResponse({ error: 'Missing user_id' }, 400);
+      }
+
+      const supabase = getSupabaseAdmin();
+      await supabase.from('profiles').update({ plan: 'pro', credits: 300 }).eq('id', userId);
+      await supabase.from('usage_logs').insert({
+        user_id: userId,
+        action: 'upgrade',
+        credits_used: 0,
+        upload_id: null,
+      });
+
+      console.log(`[handlePaddleWebhook] Upgraded user ${userId} to Pro via Paddle`);
+    }
+
+    return jsonResponse({ received: true });
+  } catch (error) {
+    console.error('[handlePaddleWebhook] error:', error);
+    return jsonResponse({ error: 'Webhook processing failed' }, 500);
+  }
+}
+
+// =============================================
+// CRON AUTOMATION HANDLERS
+// =============================================
+
+async function handleCleanupCron(request) {
+  try {
+    // Verify CRON_SECRET
+    const authHeader = request.headers.get('authorization');
+    const cronSecret = authHeader?.replace('Bearer ', '');
+    
+    if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+      return jsonResponse({ error: 'Unauthorized' }, 401);
+    }
+
+    const supabase = getSupabaseAdmin();
+    const cutoffDate = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48 hours ago
+
+    // Get old uploads
+    const { data: oldUploads } = await supabase
+      .from('uploads')
+      .select('id, file_path')
+      .lt('created_at', cutoffDate.toISOString())
+      .limit(100);
+
+    let deletedCount = 0;
+    if (oldUploads && oldUploads.length > 0) {
+      // Delete from storage
+      const filePaths = oldUploads.map(u => u.file_path).filter(Boolean);
+      if (filePaths.length > 0) {
+        await supabase.storage.from('uploads').remove(filePaths);
+      }
+
+      // Delete from database
+      const uploadIds = oldUploads.map(u => u.id);
+      await supabase.from('results').delete().in('upload_id', uploadIds);
+      await supabase.from('uploads').delete().in('id', uploadIds);
+      
+      deletedCount = oldUploads.length;
+    }
+
+    return jsonResponse({
+      success: true,
+      deleted: deletedCount,
+      cutoff: cutoffDate.toISOString(),
+    });
+  } catch (error) {
+    console.error('[handleCleanupCron] error:', error);
+    return jsonResponse({ error: 'Cleanup failed' }, 500);
+  }
+}
+
+async function handleResetCreditsCron(request) {
+  try {
+    // Verify CRON_SECRET
+    const authHeader = request.headers.get('authorization');
+    const cronSecret = authHeader?.replace('Bearer ', '');
+    
+    if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+      return jsonResponse({ error: 'Unauthorized' }, 401);
+    }
+
+    const supabase = getSupabaseAdmin();
+
+    // Reset all Pro users to 300 credits
+    const { data: updated } = await supabase
+      .from('profiles')
+      .update({ credits: 300 })
+      .eq('plan', 'pro')
+      .select('id');
+
+    return jsonResponse({
+      success: true,
+      reset_count: updated?.length || 0,
+    });
+  } catch (error) {
+    console.error('[handleResetCreditsCron] error:', error);
+    return jsonResponse({ error: 'Credit reset failed' }, 500);
   }
 }
 
@@ -844,6 +1041,10 @@ export async function POST(request, context) {
   if (routePath === 'process') return handleProcess(request);
   if (routePath === 'payment/create-order') return handleCreateOrder(request);
   if (routePath === 'payment/verify') return handlePaymentVerify(request);
+  if (routePath === 'payment/paddle/checkout') return handlePaddleCheckout(request);
+  if (routePath === 'webhooks/paddle') return handlePaddleWebhook(request);
+  if (routePath === 'cron/cleanup') return handleCleanupCron(request);
+  if (routePath === 'cron/reset-credits') return handleResetCreditsCron(request);
 
   return jsonResponse({ error: 'Not found' }, 404);
 }

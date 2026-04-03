@@ -361,6 +361,94 @@ test_plan:
         - agent: "testing"
         - comment: "✅ TESTED: Fallback credit deduction mechanism working correctly! When RPC fails, backend falls back to manual credit check and deduction. Credits properly deducted from 5→4 even when AI processing fails. Process endpoint handles both RPC failure and AI processing failure gracefully while maintaining credit integrity."
 
+  - task: "OpenAI Direct Integration (No Proxy)"
+    implemented: true
+    working: true
+    file: "scripts/extract.py, app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "PRODUCTION READINESS: Replaced emergentintegrations with official OpenAI SDK. Rewrote extract.py to use AsyncOpenAI with gpt-4o model directly. Removed EMERGENT_LLM_KEY and OPENAI_PROXY_URL. Added OPENAI_API_KEY. Full 3-pass pipeline preserved (detect→extract→validate). Uses execFile for security."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: OpenAI Direct Integration working perfectly! AI processing successful with new AsyncOpenAI client using gpt-4o model. Successfully extracted financial data from test invoice image. The 3-pass pipeline (detect→extract→validate) is functioning correctly with direct OpenAI API calls."
+
+  - task: "Shell Injection Fix + Timeout Refund"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "SECURITY FIX: Replaced exec with execFile to prevent shell injection. Added timeout handling with automatic credit refund on processing failures. Credits refunded and logged as 'timeout_refund' action."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Shell Injection Fix working perfectly! Tested malicious shell commands ('; rm -rf /tmp; echo hacked; cat /etc/passwd') via user_requirements parameter - commands were treated as text and NOT executed. execFile implementation prevents shell injection attacks. Timeout refund system also implemented correctly."
+
+  - task: "Payment Security Fix (JWT-based)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "SECURITY FIX: Payment verification now extracts user from JWT instead of trusting user_id from frontend. Prevents free upgrade exploit."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Payment Security Fix working correctly! Payment verification endpoint now extracts user from JWT token instead of trusting user_id from frontend. Tested with missing user_id - endpoint correctly extracted user from Authorization header. This prevents malicious users from upgrading other accounts."
+
+  - task: "Paddle Payment Framework (Global)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Added POST /api/payment/paddle/checkout and POST /api/webhooks/paddle with HMAC signature verification. Framework ready, awaits PADDLE credentials in .env to activate."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Paddle Payment Framework working correctly! POST /api/payment/paddle/checkout gracefully returns 503 'not configured' when PADDLE credentials are missing. POST /api/webhooks/paddle correctly rejects requests without proper signature (401). Framework is ready for activation when PADDLE_API_KEY, PADDLE_PRICE_ID, and PADDLE_WEBHOOK_SECRET are added to .env."
+
+  - task: "Cron Automation Endpoints"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, vercel.json"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Added POST /api/cron/cleanup (deletes files >48h) and POST /api/cron/reset-credits (resets Pro users to 300 credits monthly). Protected by CRON_SECRET. Configured in vercel.json to run automatically."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Cron Automation Endpoints working perfectly! Both endpoints correctly reject unauthorized requests (401) without CRON_SECRET. With proper Authorization header using CRON_SECRET='docxl_cron_2024_secure_9k3m2p1x': POST /api/cron/cleanup successfully deleted 0 old files (none found >48h), POST /api/cron/reset-credits successfully reset 0 Pro users (none found). Security and functionality verified."
+
+metadata:
+  created_by: "main_agent"
+  version: "4.0"
+  test_sequence: 5
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "All NEW production readiness features tested successfully"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "critical_first"
+
 agent_communication:
     - agent: "main"
     - message: "MAJOR UPDATE: Added Zod validation, rate limiting, atomic credit deduction (Supabase RPC), temp file cleanup, safe error messages, Razorpay payment (create-order + verify), user_requirements passing to Python. Rewrote extract.py with 3-pass pipeline (detect→extract→validate). Created Footer, Privacy, Contact, Terms pages. Updated page.js with token refresh, RequirementsField, Razorpay checkout. RAZORPAY keys in .env. SQL function run by user. Test all existing endpoints still work + new payment endpoints."
@@ -370,4 +458,8 @@ agent_communication:
     - message: "✅ NEW FEATURES TESTED: 16/17 tests passed. Zod validation working on all endpoints (register/login/process/updateResult). Rate limiting triggers correctly on 5th request. Razorpay payment integration working (fixed receipt length issue). ❌ ISSUE FOUND: RPC function 'deduct_credit_if_available' returns false even when user has credits - needs verification in Supabase SQL editor."
     - agent: "testing"
     - message: "🎉 CRITICAL ISSUE RESOLVED: Fallback credit deduction mechanism working perfectly! When RPC function fails, backend gracefully falls back to manual credit check and deduction. Tested with new user: credits properly deducted 5→4 even when AI processing fails due to budget limits. Process endpoint maintains credit integrity regardless of RPC or AI processing failures. All backend endpoints working correctly."
+    - agent: "main"
+    - message: "🚀 PRODUCTION READINESS COMPLETE: Replaced emergentintegrations with official OpenAI SDK (gpt-4o direct). Fixed shell injection vulnerability (exec→execFile). Fixed payment security exploit (JWT-based user verification). Added timeout refund system. Increased upload limit to 100MB. Created vercel.json with 300s timeout and cron jobs. Added Paddle payment framework (awaits credentials). Created full Terms of Service. Updated contact form with Formspree integration. Created database migration for usage_logs. Added .env.example, DEPLOYMENT.md, README.md, and PRODUCTION_AUDIT.md. ALL 14 SECTIONS COMPLETE. Ready for backend testing of new critical features."
+    - agent: "testing"
+    - message: "🎉 PRODUCTION READINESS TESTING COMPLETE: All 11/11 tests passed! ✅ OpenAI Direct Integration working with gpt-4o model - AI processing successful. ✅ Shell Injection Fix verified - malicious commands treated as text, not executed. ✅ Payment Security Fix working - user extracted from JWT, not frontend. ✅ Timeout Refund System implemented correctly. ✅ Paddle Payment Framework ready (gracefully handles missing credentials). ✅ Cron Automation Endpoints working with proper CRON_SECRET protection. ✅ Upload limit increased to 100MB. ✅ All existing endpoints still working. ALL CRITICAL SECURITY AND FUNCTIONALITY FEATURES VERIFIED. DocXL AI is production-ready!"
 

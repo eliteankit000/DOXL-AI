@@ -2,6 +2,7 @@
 """
 DocXL AI - Enhanced Document Extraction Script
 3-pass pipeline: detect -> extract -> validate+correct
+Uses OpenAI GPT-4o directly (no proxy)
 """
 import sys
 import os
@@ -10,11 +11,15 @@ import base64
 import asyncio
 import re
 from pathlib import Path
+from openai import AsyncOpenAI
 
-sys.path.insert(0, '/app')
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+# Initialize OpenAI client
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+if not OPENAI_API_KEY:
+    print(json.dumps({"error": "OPENAI_API_KEY not configured"}), file=sys.stderr)
+    sys.exit(1)
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 # -- Type-specific extraction prompts --
 
@@ -152,27 +157,42 @@ def parse_json_response(response):
     return None
 
 
-def make_chat(session_suffix):
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"docxl-{session_suffix}",
-        system_message="You are a precise financial document data extraction AI. Follow all instructions exactly."
-    )
-    chat.with_model("openai", "gpt-4o")
-    return chat
-
-
 # -- Pass 1: Detect document type --
 
-async def detect_type(image_content_or_text, is_image=True, session_id="detect"):
-    chat = make_chat(session_id)
+async def detect_type(image_base64_or_text, is_image=True):
     prompt = "What type of financial document is this? Reply with EXACTLY one of these words only: invoice, bank_statement, receipt, table, other"
+    
     if is_image:
-        msg = UserMessage(text=prompt, file_contents=[image_content_or_text])
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_base64_or_text}"
+                        }
+                    }
+                ]
+            }
+        ]
     else:
-        msg = UserMessage(text=f"{prompt}\n\nDocument text:\n{image_content_or_text[:3000]}")
-    response = await chat.send_message(msg)
-    detected = response.strip().lower().replace(' ', '_')
+        messages = [
+            {
+                "role": "user",
+                "content": f"{prompt}\n\nDocument text:\n{image_base64_or_text[:3000]}"
+            }
+        ]
+    
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        max_tokens=10,
+        temperature=0
+    )
+    
+    detected = response.choices[0].message.content.strip().lower().replace(' ', '_')
     if detected not in TYPE_PROMPTS:
         detected = 'other'
     return detected
@@ -180,76 +200,110 @@ async def detect_type(image_content_or_text, is_image=True, session_id="detect")
 
 # -- Pass 2: Type-specific extraction --
 
-async def extract_pass(image_content_or_text, doc_type, user_requirements, is_image=True, session_id="extract"):
+async def extract_pass(image_base64_or_text, doc_type, user_requirements, is_image=True):
     type_prompt = TYPE_PROMPTS.get(doc_type, TYPE_PROMPTS['other'])
     req_section = f"\nUSER REQUIREMENTS: {user_requirements}\nPrioritize extracting fields that match these requirements.\n" if user_requirements and user_requirements.strip() else ""
-    system = f"{type_prompt}{req_section}\n{BASE_RULES}"
-
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"docxl-{session_id}",
-        system_message=system
-    )
-    chat.with_model("openai", "gpt-4o")
+    system_message = f"{type_prompt}{req_section}\n{BASE_RULES}"
 
     prompt = "Extract ALL structured data from this document. Return ONLY valid JSON."
+    
     if is_image:
-        msg = UserMessage(text=prompt, file_contents=[image_content_or_text])
+        messages = [
+            {"role": "system", "content": system_message},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_base64_or_text}"
+                        }
+                    }
+                ]
+            }
+        ]
     else:
-        msg = UserMessage(text=f"{prompt}\n\nDocument:\n{image_content_or_text[:15000]}")
+        messages = [
+            {"role": "system", "content": system_message},
+            {
+                "role": "user",
+                "content": f"{prompt}\n\nDocument:\n{image_base64_or_text[:15000]}"
+            }
+        ]
 
-    response = await chat.send_message(msg)
-    return parse_json_response(response)
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        max_tokens=4000,
+        temperature=0
+    )
+    
+    return parse_json_response(response.choices[0].message.content)
 
 
 # -- Pass 3: Validate + self-correct --
 
-async def validate_pass(extracted_json, image_content_or_text, is_image=True, session_id="validate"):
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"docxl-{session_id}",
-        system_message=VALIDATION_PROMPT
-    )
-    chat.with_model("openai", "gpt-4o")
-
+async def validate_pass(extracted_json, image_base64_or_text, is_image=True):
     extracted_str = json.dumps(extracted_json, indent=2)
     prompt = f"Here is the extracted JSON:\n{extracted_str}\n\nNow compare against the original document and return the corrected JSON only."
 
     if is_image:
-        msg = UserMessage(text=prompt, file_contents=[image_content_or_text])
+        messages = [
+            {"role": "system", "content": VALIDATION_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_base64_or_text}"
+                        }
+                    }
+                ]
+            }
+        ]
     else:
-        msg = UserMessage(text=prompt)
+        messages = [
+            {"role": "system", "content": VALIDATION_PROMPT},
+            {"role": "user", "content": prompt}
+        ]
 
-    response = await chat.send_message(msg)
-    corrected = parse_json_response(response)
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        max_tokens=4000,
+        temperature=0
+    )
+    
+    corrected = parse_json_response(response.choices[0].message.content)
     return corrected if corrected else extracted_json
 
 
 # -- Image loader --
 
-def load_image_content(file_path):
+def load_image_base64(file_path):
     with open(file_path, 'rb') as f:
-        data = base64.b64encode(f.read()).decode('utf-8')
-    return ImageContent(image_base64=data)
+        return base64.b64encode(f.read()).decode('utf-8')
 
 
 # -- Main pipeline for images --
 
 async def process_image(file_path, user_requirements):
-    file_id = Path(file_path).stem[:12]
-    img = load_image_content(file_path)
+    img_base64 = load_image_base64(file_path)
 
     # Pass 1: detect
-    doc_type = await detect_type(img, is_image=True, session_id=f"{file_id}-det")
+    doc_type = await detect_type(img_base64, is_image=True)
 
     # Pass 2: extract
-    result = await extract_pass(img, doc_type, user_requirements, is_image=True, session_id=f"{file_id}-ext")
+    result = await extract_pass(img_base64, doc_type, user_requirements, is_image=True)
     if not result or not isinstance(result.get('rows'), list):
         return {"error": "Failed to extract structured data from this image. Please try a clearer photo."}
     result['document_type'] = doc_type
 
     # Pass 3: validate
-    result = await validate_pass(result, img, is_image=True, session_id=f"{file_id}-val")
+    result = await validate_pass(result, img_base64, is_image=True)
 
     return post_process(result)
 
@@ -257,19 +311,17 @@ async def process_image(file_path, user_requirements):
 # -- Main pipeline for PDF text --
 
 async def process_text(text, user_requirements):
-    file_id = str(abs(hash(text[:100])))[:8]
-
     # Pass 1: detect
-    doc_type = await detect_type(text, is_image=False, session_id=f"{file_id}-det")
+    doc_type = await detect_type(text, is_image=False)
 
     # Pass 2: extract
-    result = await extract_pass(text, doc_type, user_requirements, is_image=False, session_id=f"{file_id}-ext")
+    result = await extract_pass(text, doc_type, user_requirements, is_image=False)
     if not result or not isinstance(result.get('rows'), list):
         return {"error": "Failed to extract structured data. Please try uploading an image of the document."}
     result['document_type'] = doc_type
 
     # Pass 3: validate (text-only, no image in validate pass)
-    result = await validate_pass(result, text, is_image=False, session_id=f"{file_id}-val")
+    result = await validate_pass(result, text, is_image=False)
 
     return post_process(result)
 

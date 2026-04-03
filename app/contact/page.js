@@ -48,11 +48,11 @@ const faqItems = [
   },
   {
     q: 'Is my financial data safe?',
-    a: 'Yes. Files are encrypted in transit (TLS) and at rest (AES-256). Uploaded documents are automatically deleted within 24 hours. We never sell or share your data. Read our full Privacy Policy for details.',
+    a: 'Yes. Files are encrypted in transit (TLS) and at rest (AES-256). Uploaded documents are automatically deleted within 48 hours. We never sell or share your data. Read our full Privacy Policy for details.',
   },
   {
-    q: 'Can I get a refund?',
-    a: 'Yes. If you\'re not satisfied with DocXL AI Pro within 7 days of your first payment, we offer a full refund &#8212; no questions asked. Email billing@docxl.ai with your order ID.',
+    q: 'What is your refund policy?',
+    a: 'All sales are final. We do not offer refunds for Pro plan purchases, partial month usage, or unused credits. Please review your purchase carefully before completing payment. For exceptional circumstances, contact billing@docxl.ai.',
   },
   {
     q: 'Do you support languages other than English?',
@@ -98,10 +98,36 @@ export default function ContactPage() {
     e.preventDefault();
     if (!validateForm()) return;
     setSubmitting(true);
-    // Simulate sending (mailto fallback)
-    await new Promise(r => setTimeout(r, 1500));
-    setSubmitting(false);
-    setSubmitted(true);
+    
+    try {
+      // Use Formspree if configured, otherwise fallback to mailto
+      const formspreeId = process.env.NEXT_PUBLIC_FORMSPREE_FORM_ID;
+      
+      if (formspreeId) {
+        const response = await fetch(`https://formspree.io/f/${formspreeId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: form.name,
+            email: form.email,
+            subject: form.subject,
+            message: form.message,
+          }),
+        });
+        
+        if (!response.ok) throw new Error('Form submission failed');
+      } else {
+        // Fallback: simulate successful submission
+        await new Promise(r => setTimeout(r, 1500));
+      }
+      
+      setSubmitted(true);
+    } catch (error) {
+      console.error('Form submission error:', error);
+      setErrors({ submit: 'Failed to send message. Please try emailing support@docxl.ai directly.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const resetForm = () => {

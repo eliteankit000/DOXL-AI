@@ -2,6 +2,9 @@ const nextConfig = {
   output: 'standalone',
   experimental: {
     serverComponentsExternalPackages: ['exceljs'],
+    serverActions: {
+      bodySizeLimit: '100mb',
+    },
   },
   images: {
     unoptimized: true,
