@@ -15,7 +15,7 @@ import base64
 import os
 
 # Configuration
-BASE_URL = "https://docxl-ai.preview.emergentagent.com/api"
+BASE_URL = "https://sheet-converter-33.preview.emergentagent.com/api"
 TIMEOUT = 120  # 2 minutes for process endpoint
 
 class DocXLTester:
