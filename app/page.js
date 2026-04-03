@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -18,18 +18,28 @@ import {
   Plus, Minus, RefreshCw, FileDown, BarChart3, Sparkles, ChevronDown
 } from 'lucide-react';
 
-// Initialize Supabase browser client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
+// Lazy initialize Supabase browser client (only at runtime, not during build)
+let supabaseInstance = null;
+const getSupabase = () => {
+  if (supabaseInstance) return supabaseInstance;
+  if (typeof window === 'undefined') return null; // SSR/build time safety
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    console.warn('Supabase credentials not configured');
+    return null;
+  }
+  supabaseInstance = createClient(url, key);
+  return supabaseInstance;
+};
 
 const API_BASE = '/api';
 
 // Helper: API call with Supabase auth token (with token refresh)
 const apiFetch = async (url, options = {}) => {
-  const { data: { session: freshSession } } = await supabase.auth.getSession();
-  const token = freshSession?.access_token;
+  const supabase = getSupabase();
+  const session = supabase ? (await supabase.auth.getSession())?.data?.session : null;
+  const token = session?.access_token;
   const headers = { ...options.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
@@ -212,6 +222,13 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
     setLoading(true);
     setError('');
     setMessage('');
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      setError('Authentication service not available. Please try again.');
+      setLoading(false);
+      return;
+    }
 
     try {
       if (mode === 'register') {
@@ -826,6 +843,12 @@ const App = () => {
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
     document.body.appendChild(script);
 
+    const supabase = getSupabase();
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+
     const checkSession = async () => {
       try {
         const { data: { session: existingSession } } = await supabase.auth.getSession();
@@ -881,7 +904,8 @@ const App = () => {
 
   const fetchUploads = async (token) => {
     try {
-      const { data: { session: freshSession } } = await supabase.auth.getSession();
+      const supabase = getSupabase();
+      const freshSession = supabase ? (await supabase.auth.getSession())?.data?.session : null;
       const accessToken = token || freshSession?.access_token;
       if (!accessToken) return;
       const res = await fetch(`${API_BASE}/uploads`, {
@@ -896,6 +920,8 @@ const App = () => {
 
   const refreshUser = async () => {
     try {
+      const supabase = getSupabase();
+      if (!supabase) return;
       const { data: { session: s } } = await supabase.auth.getSession();
       if (!s) return;
       const res = await fetch(`${API_BASE}/auth/me`, {
@@ -916,7 +942,8 @@ const App = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    const supabase = getSupabase();
+    if (supabase) await supabase.auth.signOut();
     setUser(null);
     setSession(null);
     setUploads([]);
