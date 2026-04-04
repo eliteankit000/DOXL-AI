@@ -62,6 +62,31 @@ try {
 }
 
 const execFileAsync = promisify(execFile);
+
+// =============================================
+// DYNAMIC PYTHON PATH DETECTION
+// =============================================
+let _cachedPythonPath = null;
+async function getPythonPath() {
+  if (_cachedPythonPath) return _cachedPythonPath;
+  const candidates = [
+    '/root/.venv/bin/python3',
+    '/usr/local/bin/python3',
+    '/usr/bin/python3',
+    'python3',
+    'python',
+  ];
+  for (const candidate of candidates) {
+    try {
+      await execFileAsync(candidate, ['--version'], { timeout: 5000 });
+      _cachedPythonPath = candidate;
+      console.log(`[getPythonPath] using: ${candidate}`);
+      return candidate;
+    } catch (_) { continue; }
+  }
+  throw new Error('Python3 not found on this system.');
+}
+
 const TEMP_DIR = '/tmp/docxl_processing';
 
 export const maxDuration = 300;
@@ -137,7 +162,6 @@ async function checkRateLimit(userId, maxRequests = 5, windowMs = 60000) {
     const supabase = getSupabaseAdmin();
     const windowStart = new Date(Date.now() - windowMs).toISOString();
 
-    // Check for existing rate limit entry within the window
     const { data: existing } = await supabase
       .from('rate_limits')
       .select('id, request_count, window_start')
@@ -147,7 +171,6 @@ async function checkRateLimit(userId, maxRequests = 5, windowMs = 60000) {
       .single();
 
     if (!existing) {
-      // No entry or expired — upsert a fresh row
       await supabase
         .from('rate_limits')
         .upsert({
@@ -160,10 +183,9 @@ async function checkRateLimit(userId, maxRequests = 5, windowMs = 60000) {
     }
 
     if (existing.request_count >= maxRequests) {
-      return false; // rate limited
+      return false;
     }
 
-    // Increment counter
     await supabase
       .from('rate_limits')
       .update({ request_count: existing.request_count + 1 })
@@ -172,7 +194,6 @@ async function checkRateLimit(userId, maxRequests = 5, windowMs = 60000) {
     return true;
   } catch (e) {
     console.error('[checkRateLimit] error:', e.message);
-    // On error, allow the request (fail open)
     return true;
   }
 }
@@ -247,7 +268,6 @@ async function handleRegister(request) {
       return jsonResponse({ error: 'Registration failed. Please try again.' }, 400);
     }
 
-    // Record terms acceptance
     if (terms_accepted && data.user) {
       const clientIp = request.headers.get('x-forwarded-for')
         || request.headers.get('x-real-ip')
@@ -361,19 +381,16 @@ async function handleForgotPassword(request) {
     const { email } = validationResult.data;
     const supabase = getSupabaseAdmin();
 
-    // Always return success to prevent email enumeration
     const successResponse = jsonResponse({
       success: true,
       message: 'If an account exists for this email, a reset link has been sent. Check your inbox and spam folder.',
     });
 
     try {
-      // Look up user
       const { data: userData } = await supabase.auth.admin.listUsers();
       const targetUser = userData?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
       if (!targetUser) return successResponse;
 
-      // Generate recovery link
       const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
         type: 'recovery',
         email: email.toLowerCase(),
@@ -386,7 +403,6 @@ async function handleForgotPassword(request) {
 
       const resetLink = linkData.properties?.action_link || linkData.properties?.hashed_token;
 
-      // Send via Brevo API
       const brevoKey = process.env.BREVO_API_KEY;
       if (!brevoKey) {
         console.error('[handleForgotPassword] BREVO_API_KEY not configured');
@@ -580,7 +596,6 @@ async function handleProcess(request) {
 
     const { upload_id, user_requirements = '' } = validationResult.data;
 
-    // Supabase-backed persistent rate limit check
     const allowed = await checkRateLimit(user.id);
     if (!allowed) {
       return new NextResponse(JSON.stringify({ error: 'Too many requests. Please wait a minute.' }), {
@@ -591,15 +606,12 @@ async function handleProcess(request) {
 
     const supabase = getSupabaseAdmin();
 
-    // Fallback manual deduction removed intentionally — it lacks row-level locking
-    // and allows race conditions. This RPC is the only safe deduction path.
     const { data: canProcess, error: rpcError } = await supabase.rpc('deduct_credit_if_available', { user_uuid: user.id });
     if (rpcError || !canProcess) {
       if (rpcError) console.error('[handleProcess] RPC error:', rpcError);
       return jsonResponse({ error: 'No credits remaining. Please upgrade to Pro.' }, 403);
     }
 
-    // Fetch upload record
     const { data: upload, error: fetchErr } = await supabase
       .from('uploads')
       .select('*')
@@ -640,13 +652,20 @@ async function handleProcess(request) {
       const fileBuffer = Buffer.from(await fileBlob.arrayBuffer());
       await writeFile(tempFilePath, fileBuffer);
 
-      // Only OPENAI_API_KEY and PATH are passed to prevent secret
-      // exfiltration via a maliciously crafted document.
-      const { stdout, stderr } = await execFileAsync(
-        '/root/.venv/bin/python3',
-        ['scripts/extract.py', tempFilePath, user_requirements || ''],
+      // =============================================
+      // FIX: Dynamic Python path + safe stderr check
+      // =============================================
+      const pythonExec = await getPythonPath();
+      const projectRoot = process.cwd();
+      const scriptPath = path.join(projectRoot, 'scripts', 'extract.py');
+
+      console.log(`[handleProcess] python:${pythonExec} | cwd:${projectRoot} | file:${tempFilePath}`);
+
+      const rawResult = await execFileAsync(
+        pythonExec,
+        [scriptPath, tempFilePath, user_requirements || ''],
         {
-          cwd: '/app',
+          cwd: projectRoot,
           timeout: 180000,
           maxBuffer: 10 * 1024 * 1024,
           env: {
@@ -654,17 +673,46 @@ async function handleProcess(request) {
             PATH: process.env.PATH,
           },
         }
-      );
+      ).catch(err => {
+        const out = (err.stdout || '').trim();
+        const errStr = err.stderr || err.message || '';
+        console.error('[handleProcess] execFile error:', errStr.substring(0, 400));
+        // If the script still produced valid JSON on stdout despite non-zero exit, use it
+        if (out) return { stdout: out, stderr: errStr };
+        throw new Error('Script failed: ' + errStr.substring(0, 300));
+      });
 
-      if (stderr && stderr.includes('Error') && !stdout.trim()) {
-        console.error('[handleProcess] extract stderr:', stderr);
+      const { stdout, stderr } = rawResult;
+
+      // Only treat stderr as fatal when it contains real Python-level errors
+      // AND there is no usable stdout. This prevents false failures caused by
+      // informational messages from the OpenAI SDK that contain the word "Error".
+      const FATAL_STDERR_PATTERNS = [
+        'Traceback (most recent call last)',
+        'ModuleNotFoundError',
+        'ImportError',
+        'SyntaxError',
+        'FileNotFoundError',
+        'PermissionError',
+        'OPENAI_API_KEY not configured',
+      ];
+      const isFatalStderr = stderr &&
+        !stdout.trim() &&
+        FATAL_STDERR_PATTERNS.some(p => stderr.includes(p));
+
+      if (isFatalStderr) {
+        console.error('[handleProcess] fatal stderr:', stderr.substring(0, 400));
         throw new Error('Extraction script error: ' + stderr.substring(0, 200));
       }
-      if (stderr) console.error('[handleProcess] extract stderr:', stderr);
+      if (stderr) {
+        // Non-fatal — OpenAI SDK and pdfplumber write info/warnings to stderr
+        console.error('[handleProcess] stderr (non-fatal):', stderr.substring(0, 300));
+      }
 
       if (!stdout || !stdout.trim()) {
         throw new Error('No output from extraction script — document may be empty or corrupted');
       }
+      // =============================================
 
       let result;
       const trimmedOutput = stdout.trim();
@@ -703,7 +751,6 @@ async function handleProcess(request) {
         total_amount: normalizedRows.reduce((sum, r) => sum + r.amount, 0),
       };
 
-      // Build response payload
       const responsePayload = {
         document_type: result.document_type || 'other',
         rows: normalizedRows,
@@ -711,7 +758,6 @@ async function handleProcess(request) {
         confidence_score: result.confidence || 0.85,
       };
 
-      // Pass through page warning from extract.py
       if (result.page_warning) {
         responsePayload.warning = result.page_warning;
       }
@@ -1210,7 +1256,6 @@ async function handleCleanupCron(request) {
       deletedCount = oldUploads.length;
     }
 
-    // Clean old rate limit entries (older than 5 minutes)
     const rateLimitCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     await supabase.from('rate_limits').delete().lt('window_start', rateLimitCutoff);
 
@@ -1372,7 +1417,7 @@ async function handleAdminGetActivity(request) {
   } catch (error) {
     console.error('[adminGetActivity] error:', error);
     captureException(error);
-    return jsonResponse({ error: 'Failed to fetch activity' }, 500);
+    return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
@@ -1433,7 +1478,6 @@ export async function GET(request, context) {
   if (routePath.startsWith('result/')) return handleGetResult(request, pathSegments[1]);
   if (routePath.startsWith('export/excel/')) return handleExportExcel(request, pathSegments[2]);
 
-  // Admin routes
   if (routePath === 'admin/users') return handleAdminGetUsers(request);
   if (routePath === 'admin/stats') return handleAdminGetStats(request);
   if (routePath === 'admin/activity') return handleAdminGetActivity(request);
@@ -1460,7 +1504,6 @@ export async function POST(request, context) {
   if (routePath === 'cron/cleanup-files' || routePath === 'cron/cleanup') return handleCleanupCron(request);
   if (routePath === 'cron/reset-credits') return handleResetCreditsCron(request);
 
-  // Admin routes
   if (routePath === 'admin/credits') return handleAdminUpdateCredits(request);
 
   return jsonResponse({ error: 'Not found' }, 404);
