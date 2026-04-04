@@ -87,6 +87,27 @@ async function getPythonPath() {
   throw new Error('Python3 not found on this system.');
 }
 
+// =============================================
+// AUTO-INSTALL PYTHON DEPENDENCIES
+// =============================================
+let _depsInstalled = false;
+async function ensurePythonDeps() {
+  if (_depsInstalled) return;
+  const pythonExec = await getPythonPath();
+  const deps = ['openai', 'pdfplumber', 'python-dateutil', 'Pillow'];
+  try {
+    await execFileAsync(pythonExec, ['-m', 'pip', 'install', '--quiet', ...deps], {
+      timeout: 120000,
+      env: { PATH: process.env.PATH },
+    });
+    _depsInstalled = true;
+    console.log('[ensurePythonDeps] deps ready');
+  } catch (e) {
+    console.error('[ensurePythonDeps] install error (non-fatal):', e.message?.substring(0, 200));
+    _depsInstalled = true; // Don't retry on every request
+  }
+}
+
 const TEMP_DIR = '/tmp/docxl_processing';
 
 export const maxDuration = 300;
@@ -659,6 +680,9 @@ async function handleProcess(request) {
       const projectRoot = process.cwd();
       const scriptPath = path.join(projectRoot, 'scripts', 'extract.py');
 
+      // ── CHANGE 2: ensure Python deps are installed ──
+      await ensurePythonDeps();
+
       console.log(`[handleProcess] python:${pythonExec} | cwd:${projectRoot} | file:${tempFilePath}`);
 
       const rawResult = await execFileAsync(
@@ -687,6 +711,7 @@ async function handleProcess(request) {
       // Only treat stderr as fatal when it contains real Python-level errors
       // AND there is no usable stdout. This prevents false failures caused by
       // informational messages from the OpenAI SDK that contain the word "Error".
+      // ── CHANGE 3a: added 'No module named' ──
       const FATAL_STDERR_PATTERNS = [
         'Traceback (most recent call last)',
         'ModuleNotFoundError',
@@ -695,6 +720,7 @@ async function handleProcess(request) {
         'FileNotFoundError',
         'PermissionError',
         'OPENAI_API_KEY not configured',
+        'No module named',
       ];
       const isFatalStderr = stderr &&
         !stdout.trim() &&
@@ -702,6 +728,11 @@ async function handleProcess(request) {
 
       if (isFatalStderr) {
         console.error('[handleProcess] fatal stderr:', stderr.substring(0, 400));
+        // ── CHANGE 3b: reset dep cache so next request re-installs ──
+        if (stderr.includes('No module named')) {
+          _depsInstalled = false;
+          _cachedPythonPath = null;
+        }
         throw new Error('Extraction script error: ' + stderr.substring(0, 200));
       }
       if (stderr) {
