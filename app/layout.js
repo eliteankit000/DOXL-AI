@@ -1,76 +1,177 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
+import JsonLd from '@/components/JsonLd';
 
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata = {
-  title: 'DocXL AI — Convert PDF, Invoice & Bank Statement to Excel with AI',
-  description: 'Upload any PDF, invoice, bank statement, receipt, or image and instantly convert it to structured Excel data using AI. Free 5 extractions. Fast, accurate, secure.',
+  metadataBase: new URL('https://docxl.ai'),
+  title: {
+    default: 'DocXL AI — Convert PDF to Excel Free Online',
+    template: '%s | DocXL AI',
+  },
+  description:
+    'DocXL AI converts PDFs, invoices, bank statements, and images to ' +
+    'editable Excel spreadsheets in seconds using GPT-4o AI. Free to try. ' +
+    'No signup required for first conversion.',
   keywords: [
-    'PDF to Excel', 'convert PDF to Excel', 'invoice to Excel', 'bank statement to Excel',
-    'AI document extraction', 'PDF data extraction', 'image to spreadsheet', 'receipt to Excel',
-    'OCR PDF to Excel', 'financial document parser', 'AI invoice reader', 'extract table from PDF',
-    'DocXL AI', 'document to structured data', 'PDF to CSV', 'automated data entry',
-    'bank statement parser', 'invoice data extractor', 'AI powered OCR', 'document processing AI',
-  ].join(', '),
-  authors: [{ name: 'DocXL AI' }],
+    'pdf to excel converter',
+    'convert pdf to excel',
+    'pdf to excel free',
+    'pdf table to excel',
+    'invoice to excel',
+    'bank statement to excel',
+    'image to excel',
+    'AI pdf converter',
+    'extract table from pdf',
+    'pdf data extraction',
+    'convert pdf to spreadsheet',
+    'pdf to xlsx',
+    'ocr to excel',
+    'gpt4 pdf converter',
+    'docxl ai',
+  ],
+  authors: [{ name: 'DocXL AI', url: 'https://docxl.ai' }],
   creator: 'DocXL AI',
   publisher: 'DocXL AI',
-  robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
+  category: 'Productivity',
+  classification: 'Business/Productivity',
+  robots: {
+    index: true,
+    follow: true,
+    nocache: false,
+    googleBot: {
+      index: true,
+      follow: true,
+      noimageindex: false,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  alternates: {
+    canonical: 'https://docxl.ai',
+  },
   openGraph: {
     type: 'website',
     locale: 'en_US',
+    url: 'https://docxl.ai',
     siteName: 'DocXL AI',
-    title: 'DocXL AI — Convert PDF, Invoice & Bank Statement to Excel with AI',
-    description: 'Upload any PDF, invoice, bank statement, or image and instantly convert it to structured Excel data using AI. Free 5 extractions.',
+    title: 'DocXL AI — Convert PDF to Excel Free Online Using AI',
+    description:
+      'Upload any PDF, invoice, or image and get a perfectly formatted ' +
+      'Excel file in seconds. Powered by GPT-4o. Try free today.',
+    images: [
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'DocXL AI — PDF to Excel Converter powered by GPT-4o',
+        type: 'image/png',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'DocXL AI — PDF to Excel with AI',
-    description: 'Convert PDFs, invoices, bank statements & images to structured Excel data instantly with AI.',
+    site: '@docxlai',
     creator: '@docxlai',
+    title: 'DocXL AI — Convert PDF to Excel Free Online Using AI',
+    description:
+      'Upload any PDF, invoice, or image and get a perfectly formatted ' +
+      'Excel file in seconds. Powered by GPT-4o.',
+    images: ['/og-image.png'],
   },
-  alternates: {
-    canonical: '/',
+  verification: {
+    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || '',
   },
-  category: 'Technology',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.png', type: 'image/png', sizes: '32x32' },
+      { url: '/icon-16.png', type: 'image/png', sizes: '16x16' },
+      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/icon-512.png', type: 'image/png', sizes: '512x512' },
+    ],
+    apple: [
+      { url: '/apple-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico',
+  },
+  other: {
+    'application-name': 'DocXL AI',
+  },
+};
+
+const webAppSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'WebApplication',
+  name: 'DocXL AI',
+  url: 'https://docxl.ai',
+  logo: 'https://docxl.ai/logo.png',
+  description: 'AI-powered PDF to Excel converter using GPT-4o',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web',
+  offers: [
+    {
+      '@type': 'Offer',
+      name: 'Free Plan',
+      price: '0',
+      priceCurrency: 'USD',
+      description: '5 free PDF to Excel conversions',
+    },
+    {
+      '@type': 'Offer',
+      name: 'Pro Plan',
+      price: '9',
+      priceCurrency: 'USD',
+      priceSpecification: {
+        '@type': 'UnitPriceSpecification',
+        billingDuration: 'P1M',
+      },
+      description: '300 PDF to Excel conversions per month',
+    },
+  ],
+  featureList: [
+    'Convert PDF to Excel',
+    'Convert images to Excel',
+    'Invoice data extraction',
+    'Bank statement conversion',
+    'GPT-4o powered accuracy',
+    'Instant download',
+  ],
+  screenshot: 'https://docxl.ai/og-image.png',
+  softwareVersion: '1.0',
+  contactPoint: {
+    '@type': 'ContactPoint',
+    email: 'hello@docxlai.com',
+    contactType: 'customer support',
+  },
+};
+
+const orgSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'DocXL AI',
+  url: 'https://docxl.ai',
+  logo: 'https://docxl.ai/logo.png',
+  email: 'hello@docxlai.com',
+  sameAs: [],
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <meta name="theme-color" content="#1D4ED8" />
-        <link rel="canonical" href="https://docxl.ai" />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              '@context': 'https://schema.org',
-              '@type': 'SoftwareApplication',
-              name: 'DocXL AI',
-              applicationCategory: 'BusinessApplication',
-              operatingSystem: 'Web',
-              description: 'AI-powered document to Excel converter. Upload PDFs, invoices, bank statements, or images and get structured Excel data instantly.',
-              offers: [
-                { '@type': 'Offer', price: '0', priceCurrency: 'USD', name: 'Free Plan — 5 extractions' },
-                { '@type': 'Offer', price: '9', priceCurrency: 'USD', name: 'Pro Plan — 300 extractions/month' },
-              ],
-              aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.8', ratingCount: '120' },
-              featureList: [
-                'PDF to Excel conversion',
-                'Invoice data extraction',
-                'Bank statement parsing',
-                'Image and receipt OCR',
-                'Editable results table',
-                'AI-powered accuracy',
-                'XLSX and JSON export',
-              ],
-            }),
-          }}
-        />
+        <link rel="manifest" href="/site.webmanifest" />
+        <meta name="theme-color" content="#2563eb" />
+        <meta name="msapplication-TileColor" content="#2563eb" />
+        <meta name="msapplication-config" content="/browserconfig.xml" />
       </head>
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        <JsonLd data={webAppSchema} />
+        <JsonLd data={orgSchema} />
+        {children}
+      </body>
     </html>
   );
 }

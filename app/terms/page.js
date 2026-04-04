@@ -3,8 +3,10 @@ import { FileSpreadsheet, ArrowLeft } from 'lucide-react';
 import Footer from '@/components/Footer';
 
 export const metadata = {
-  title: 'Terms of Service - DocXL AI',
-  description: 'Terms of Service for DocXL AI document extraction platform',
+  title: 'Terms of Service — DocXL AI',
+  description: 'Terms of Service for DocXL AI PDF to Excel converter.',
+  alternates: { canonical: 'https://docxl.ai/terms' },
+  robots: { index: true, follow: false },
 };
 
 export default function TermsPage() {
@@ -241,7 +243,7 @@ export default function TermsPage() {
             <div className="text-muted-foreground leading-relaxed space-y-2">
               <p>If you have questions about these Terms, please contact us:</p>
               <p>
-                <strong>Email:</strong> <a href="mailto:support@docxl.ai" className="text-primary hover:underline">support@docxl.ai</a>
+                <strong>Email:</strong> <a href="mailto:hello@docxlai.com" className="text-primary hover:underline">hello@docxlai.com</a>
               </p>
               <p>
                 <strong>Contact Form:</strong> <Link href="/contact" className="text-primary hover:underline">docxl.ai/contact</Link>

@@ -10,14 +10,14 @@ const Footer = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           {/* Column 1 - Brand */}
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
+            <Link href="/" className="flex items-center gap-2" aria-label="DocXL AI home">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 text-white" />
               </div>
               <span className="text-lg font-bold text-foreground">DocXL AI</span>
-            </div>
+            </Link>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Transform documents into structured data with AI. Fast, secure, and accurate.
+              AI-powered PDF to Excel converter. Fast, secure, and accurate.
             </p>
             <p className="text-xs text-muted-foreground">Made with &#9829; in India</p>
           </div>
@@ -26,9 +26,9 @@ const Footer = () => {
           <div>
             <h4 className="font-semibold text-foreground mb-4">Product</h4>
             <ul className="space-y-3">
-              <li><Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors">Dashboard</Link></li>
-              <li><Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors">Upload Document</Link></li>
-              <li><Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors">Pricing</Link></li>
+              <li><Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors">PDF to Excel Converter</Link></li>
+              <li><Link href="/pricing" className="text-sm text-muted-foreground hover:text-primary transition-colors">Pricing</Link></li>
+              <li><Link href="/blog" className="text-sm text-muted-foreground hover:text-primary transition-colors">Blog</Link></li>
               <li><Link href="/#how-it-works" className="text-sm text-muted-foreground hover:text-primary transition-colors">How it works</Link></li>
             </ul>
           </div>
@@ -37,9 +37,9 @@ const Footer = () => {
           <div>
             <h4 className="font-semibold text-foreground mb-4">Legal & Support</h4>
             <ul className="space-y-3">
-              <li><Link href="/privacy" className="text-sm text-muted-foreground hover:text-primary transition-colors">Privacy Policy</Link></li>
-              <li><Link href="/contact" className="text-sm text-muted-foreground hover:text-primary transition-colors">Contact Us</Link></li>
               <li><Link href="/terms" className="text-sm text-muted-foreground hover:text-primary transition-colors">Terms of Service</Link></li>
+              <li><Link href="/privacy" className="text-sm text-muted-foreground hover:text-primary transition-colors">Privacy Policy</Link></li>
+              <li><Link href="/contact" className="text-sm text-muted-foreground hover:text-primary transition-colors">Contact Support</Link></li>
             </ul>
           </div>
 
@@ -48,9 +48,11 @@ const Footer = () => {
             <h4 className="font-semibold text-foreground mb-4">Connect</h4>
             <ul className="space-y-3">
               <li>
-                <a href="mailto:support@docxl.ai" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
-                  <Mail className="w-4 h-4" /> support@docxl.ai
-                </a>
+                <address className="not-italic">
+                  <a href="mailto:hello@docxlai.com" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
+                    <Mail className="w-4 h-4" /> hello@docxlai.com
+                  </a>
+                </address>
               </li>
               <li>
                 <a href="https://twitter.com/docxlai" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
@@ -60,11 +62,6 @@ const Footer = () => {
               <li>
                 <a href="https://linkedin.com/company/docxlai" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
                   <Linkedin className="w-4 h-4" /> DocXL AI
-                </a>
-              </li>
-              <li>
-                <a href="https://github.com/docxlai" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
-                  <Github className="w-4 h-4" /> GitHub
                 </a>
               </li>
             </ul>
@@ -98,6 +95,7 @@ const Footer = () => {
             </p>
             <div className="flex items-center gap-4 flex-shrink-0">
               <Link href="/privacy" className="text-xs text-gray-400 hover:text-white transition-colors">Privacy Policy</Link>
+              <Link href="/terms" className="text-xs text-gray-400 hover:text-white transition-colors">Terms of Service</Link>
               <Link href="/contact" className="text-xs text-gray-400 hover:text-white transition-colors">Contact</Link>
               <span className="text-[10px] bg-gray-800 text-gray-500 px-2 py-0.5 rounded font-mono">v1.0.0</span>
             </div>

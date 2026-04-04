@@ -1,4 +1,8 @@
+const { withSentryConfig } = require('@sentry/nextjs');
+
 const nextConfig = {
+  compress: true,
+  poweredByHeader: false,
   experimental: {
     serverComponentsExternalPackages: ['exceljs'],
     serverActions: {
@@ -7,6 +11,8 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 86400,
   },
   webpack(config, { dev }) {
     if (dev) {
@@ -25,17 +31,41 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: "/(.*)",
+        source: '/(.*)',
         headers: [
-          { key: "X-Frame-Options", value: "ALLOWALL" },
-          { key: "Content-Security-Policy", value: "frame-ancestors *;" },
-          { key: "Access-Control-Allow-Origin", value: process.env.CORS_ORIGINS || "*" },
-          { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, OPTIONS" },
-          { key: "Access-Control-Allow-Headers", value: "*" },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-XSS-Protection', value: '1; mode=block' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors *;" },
+          { key: 'Access-Control-Allow-Origin', value: process.env.CORS_ORIGINS || '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: '*' },
+        ],
+      },
+      {
+        source: '/(.*)\\.(ico|png|svg|jpg|jpeg|webp|avif|woff2|woff)',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
+        source: '/(sitemap.xml|robots.txt|site.webmanifest)',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=3600' },
         ],
       },
     ];
   },
 };
 
-module.exports = nextConfig;
+const sentryWebpackPluginOptions = {
+  silent: true,
+  org: process.env.SENTRY_ORG || '',
+  project: process.env.SENTRY_PROJECT || '',
+};
+
+module.exports = process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? withSentryConfig(nextConfig, sentryWebpackPluginOptions)
+  : nextConfig;

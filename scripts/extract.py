@@ -669,7 +669,9 @@ async def handle_pdf(file_path, user_requirements):
             import pdfplumber
             all_rows = []
             best_doc_type = 'other'
+            total_page_count = 0
             with pdfplumber.open(file_path) as pdf:
+                total_page_count = len(pdf.pages)
                 for page_num, page in enumerate(pdf.pages[:6]):
                     try:
                         img = page.to_image(resolution=220)
@@ -687,14 +689,34 @@ async def handle_pdf(file_path, user_requirements):
 
             if all_rows:
                 validated = validate_rows(all_rows)
-                return normalize_result(validated, best_doc_type)
+                result = normalize_result(validated, best_doc_type)
+                if total_page_count > 6:
+                    result["page_warning"] = (
+                        f"Only the first 6 of {total_page_count} pages were processed. "
+                        "To extract all data, split your PDF into parts and upload each separately."
+                    )
+                return result
             return {'error': 'Could not extract data from this scanned PDF. Try uploading a clearer scan or a text-based PDF.'}
         except Exception as e:
             print(f'[handle_pdf] image conversion failed: {e}', file=sys.stderr)
             return {'error': 'PDF processing failed. Please try uploading an image of the document.'}
     else:
         print(f'[handle_pdf] text PDF, {len(text)} chars extracted', file=sys.stderr)
-        return await run_extraction_pipeline(file_path, user_requirements, is_image=False, text_content=text)
+        # Check total page count for text PDFs too
+        total_page_count = 0
+        try:
+            import pdfplumber
+            with pdfplumber.open(file_path) as pdf:
+                total_page_count = len(pdf.pages)
+        except Exception:
+            pass
+        result = await run_extraction_pipeline(file_path, user_requirements, is_image=False, text_content=text)
+        if total_page_count > 6 and result and 'rows' in result:
+            result["page_warning"] = (
+                f"Only the first 6 of {total_page_count} pages were processed. "
+                "To extract all data, split your PDF into parts and upload each separately."
+            )
+        return result
 
 # ═══════════════════════════════════════════════════════
 # ENTRY POINT

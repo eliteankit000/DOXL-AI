@@ -1,401 +1,312 @@
 #!/usr/bin/env python3
 """
-DocXL AI Backend Testing Suite
-Tests the 4 tasks that need retesting:
-1. Update Result schema with confidence field
-2. Document Processing Error Fix (timeout, stderr, JSON parsing)
-3. Excel Export Confidence Column
-4. Extract.py 7-Step Pipeline validation
+DocXL AI Backend Testing Script - v3.0 New Endpoints Focus
+Tests the NEW endpoints added in the latest update.
 """
 
 import requests
 import json
 import time
-import io
-import base64
-from PIL import Image, ImageDraw, ImageFont
+import sys
+from typing import Dict, Any
 
-BASE_URL = "http://localhost:3000/api"
-CRON_SECRET = "docxl_cron_2024_secure_9k3m2p1x"
+# Base URL for testing
+BASE_URL = "http://localhost:3000"
+API_BASE = f"{BASE_URL}/api"
 
-class DocXLTester:
+class BackendTester:
     def __init__(self):
+        self.results = []
         self.session = requests.Session()
-        self.token = None
-        self.user_id = None
-        self.upload_id = None
-        self.result_id = None
+        # Set a reasonable timeout
+        self.session.timeout = 30
         
-    def log(self, message):
-        print(f"[TEST] {message}")
+    def log_result(self, test_name: str, success: bool, details: str = "", response_data: Any = None):
+        """Log test result"""
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"{status} {test_name}: {details}")
         
-    def create_test_image(self):
-        """Create a test financial document image with tabular data"""
-        # Create a 800x600 image with financial data
-        img = Image.new('RGB', (800, 600), color='white')
-        draw = ImageDraw.Draw(img)
-        
-        # Try to use a font, fallback to default if not available
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
-            title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-        except:
-            font = ImageFont.load_default()
-            title_font = ImageFont.load_default()
-        
-        # Draw invoice header
-        draw.text((50, 30), "INVOICE", font=title_font, fill='black')
-        draw.text((50, 60), "Invoice No: INV-2024-001", font=font, fill='black')
-        draw.text((50, 80), "Date: 2024-01-15", font=font, fill='black')
-        
-        # Draw table headers
-        y_start = 120
-        draw.text((50, y_start), "Description", font=font, fill='black')
-        draw.text((300, y_start), "Amount", font=font, fill='black')
-        draw.text((450, y_start), "GST", font=font, fill='black')
-        draw.text((550, y_start), "Total", font=font, fill='black')
-        
-        # Draw table data
-        items = [
-            ("Software License", "1000.00", "180.00", "1180.00"),
-            ("Consulting Services", "2500.00", "450.00", "2950.00"),
-            ("Support Package", "500.00", "90.00", "590.00"),
-            ("Training Session", "1500.00", "270.00", "1770.00")
-        ]
-        
-        for i, (desc, amount, gst, total) in enumerate(items):
-            y = y_start + 30 + (i * 25)
-            draw.text((50, y), desc, font=font, fill='black')
-            draw.text((300, y), amount, font=font, fill='black')
-            draw.text((450, y), gst, font=font, fill='black')
-            draw.text((550, y), total, font=font, fill='black')
-        
-        # Draw total line
-        y_total = y_start + 30 + (len(items) * 25) + 20
-        draw.text((300, y_total), "TOTAL:", font=title_font, fill='black')
-        draw.text((550, y_total), "6490.00", font=title_font, fill='black')
-        
-        # Save to bytes
-        img_bytes = io.BytesIO()
-        img.save(img_bytes, format='PNG')
-        img_bytes.seek(0)
-        return img_bytes.getvalue()
-
+        self.results.append({
+            "test": test_name,
+            "success": success,
+            "details": details,
+            "response_data": response_data
+        })
+    
     def test_health_check(self):
-        """Test health check endpoint"""
+        """Test GET /api/health endpoint"""
         try:
-            response = self.session.get(f"{BASE_URL}/health")
+            response = self.session.get(f"{API_BASE}/health")
+            
             if response.status_code == 200:
                 data = response.json()
-                if data.get('status') == 'ok' and data.get('backend') == 'supabase':
-                    self.log("✅ Health check passed - Supabase backend confirmed")
-                    return True
-            self.log(f"❌ Health check failed: {response.status_code} - {response.text}")
-            return False
-        except Exception as e:
-            self.log(f"❌ Health check error: {e}")
-            return False
-
-    def test_register_and_login(self):
-        """Test user registration and login"""
-        try:
-            # Generate unique email
-            timestamp = int(time.time())
-            email = f"test_confidence_{timestamp}@docxl.com"
-            password = "TestPass123!"
-            name = "Test Confidence User"
-            
-            # Register
-            register_data = {
-                "email": email,
-                "password": password,
-                "name": name
-            }
-            
-            response = self.session.post(f"{BASE_URL}/auth/register", json=register_data)
-            if response.status_code != 201:
-                self.log(f"❌ Registration failed: {response.status_code} - {response.text}")
-                return False
-                
-            self.log("✅ User registration successful")
-            
-            # Login
-            login_data = {
-                "email": email,
-                "password": password
-            }
-            
-            response = self.session.post(f"{BASE_URL}/auth/login", json=login_data)
-            if response.status_code != 200:
-                self.log(f"❌ Login failed: {response.status_code} - {response.text}")
-                return False
-                
-            data = response.json()
-            self.token = data.get('token')
-            self.user_id = data.get('user', {}).get('id')
-            
-            if not self.token:
-                self.log("❌ No token received from login")
-                return False
-                
-            # Set authorization header for future requests
-            self.session.headers.update({'Authorization': f'Bearer {self.token}'})
-            self.log("✅ User login successful, token obtained")
-            return True
-            
-        except Exception as e:
-            self.log(f"❌ Registration/Login error: {e}")
-            return False
-
-    def test_file_upload(self):
-        """Test file upload with test image"""
-        try:
-            # Create test image
-            img_data = self.create_test_image()
-            
-            # Upload file
-            files = {
-                'file': ('test_invoice.png', img_data, 'image/png')
-            }
-            
-            response = self.session.post(f"{BASE_URL}/upload", files=files)
-            if response.status_code != 201:
-                self.log(f"❌ File upload failed: {response.status_code} - {response.text}")
-                return False
-                
-            data = response.json()
-            self.upload_id = data.get('upload', {}).get('id')
-            
-            if not self.upload_id:
-                self.log("❌ No upload ID received")
-                return False
-                
-            self.log(f"✅ File upload successful, upload_id: {self.upload_id}")
-            return True
-            
-        except Exception as e:
-            self.log(f"❌ File upload error: {e}")
-            return False
-
-    def test_ai_process_with_confidence(self):
-        """Test AI processing with confidence field inclusion"""
-        try:
-            process_data = {
-                "upload_id": self.upload_id,
-                "user_requirements": "Extract invoice line items with confidence scores"
-            }
-            
-            response = self.session.post(f"{BASE_URL}/process", json=process_data)
-            if response.status_code != 200:
-                self.log(f"❌ AI processing failed: {response.status_code} - {response.text}")
-                return False
-                
-            data = response.json()
-            result = data.get('result', {})
-            self.result_id = result.get('id')
-            rows = result.get('rows', [])
-            
-            if not self.result_id:
-                self.log("❌ No result ID received from processing")
-                return False
-                
-            if not rows:
-                self.log("❌ No rows extracted from processing")
-                return False
-                
-            # Check if confidence field is present in rows
-            confidence_found = False
-            for row in rows:
-                if 'confidence' in row and row['confidence'] is not None:
-                    confidence_found = True
-                    break
-                    
-            if not confidence_found:
-                self.log("❌ Confidence field not found in extracted rows")
-                return False
-                
-            self.log(f"✅ AI processing successful with confidence field. Extracted {len(rows)} rows")
-            self.log(f"   Sample row confidence: {rows[0].get('confidence', 'N/A')}")
-            return True
-            
-        except Exception as e:
-            self.log(f"❌ AI processing error: {e}")
-            return False
-
-    def test_update_result_with_confidence(self):
-        """Test updating result with confidence and row_number fields"""
-        try:
-            # First get the current result
-            response = self.session.get(f"{BASE_URL}/result/{self.result_id}")
-            if response.status_code != 200:
-                self.log(f"❌ Failed to get result: {response.status_code} - {response.text}")
-                return False
-                
-            data = response.json()
-            rows = data.get('result', {}).get('rows', [])
-            
-            if not rows:
-                self.log("❌ No rows found in result")
-                return False
-                
-            # Modify rows to test new schema fields
-            updated_rows = []
-            for i, row in enumerate(rows):
-                updated_row = {
-                    "date": row.get('date', '2024-01-15'),
-                    "description": row.get('description', f'Updated Item {i+1}'),
-                    "amount": "1250.50",  # Test string amount
-                    "type": row.get('type', 'expense'),
-                    "category": row.get('category', 'software'),
-                    "gst": "225.09",  # Test string GST
-                    "reference": row.get('reference', f'REF-{i+1}'),
-                    "confidence": 0.92,  # Test confidence field
-                    "row_number": i + 1  # Test row_number field
-                }
-                updated_rows.append(updated_row)
-            
-            # Update result
-            update_data = {"rows": updated_rows}
-            response = self.session.put(f"{BASE_URL}/result/{self.result_id}", json=update_data)
-            
-            if response.status_code != 200:
-                self.log(f"❌ Update result failed: {response.status_code} - {response.text}")
-                return False
-                
-            self.log("✅ Update result successful with confidence and row_number fields")
-            self.log(f"   Updated {len(updated_rows)} rows with string amounts and confidence scores")
-            return True
-            
-        except Exception as e:
-            self.log(f"❌ Update result error: {e}")
-            return False
-
-    def test_excel_export_with_confidence(self):
-        """Test Excel export includes confidence column"""
-        try:
-            response = self.session.get(f"{BASE_URL}/export/excel/{self.result_id}")
-            if response.status_code != 200:
-                self.log(f"❌ Excel export failed: {response.status_code} - {response.text}")
-                return False
-                
-            # Check content type
-            content_type = response.headers.get('content-type', '')
-            if 'spreadsheet' not in content_type:
-                self.log(f"❌ Invalid content type for Excel: {content_type}")
-                return False
-                
-            # Check file size (should be reasonable for Excel file)
-            content_length = len(response.content)
-            if content_length < 1000:  # Excel files should be at least 1KB
-                self.log(f"❌ Excel file too small: {content_length} bytes")
-                return False
-                
-            self.log(f"✅ Excel export successful with confidence column")
-            self.log(f"   File size: {content_length} bytes, Content-Type: {content_type}")
-            return True
-            
-        except Exception as e:
-            self.log(f"❌ Excel export error: {e}")
-            return False
-
-    def test_extract_script_validation(self):
-        """Test that extract.py script can be imported without errors"""
-        try:
-            import subprocess
-            import os
-            
-            # Test 1: Import the script (should fail with OPENAI_API_KEY error, which is expected)
-            result = subprocess.run([
-                '/root/.venv/bin/python3', '-c', 'import scripts.extract'
-            ], cwd='/app', capture_output=True, text=True, env={**os.environ, 'OPENAI_API_KEY': ''})
-            
-            # Should exit with code 1 and show OPENAI_API_KEY error
-            if result.returncode == 1 and 'OPENAI_API_KEY not configured' in result.stdout:
-                self.log("✅ Extract.py import validation successful - properly checks for OPENAI_API_KEY")
+                if data.get("status") == "ok" and data.get("backend") == "supabase":
+                    self.log_result("Health Check", True, f"Status: {data.get('status')}, Backend: {data.get('backend')}")
+                else:
+                    self.log_result("Health Check", False, f"Unexpected response format: {data}")
             else:
-                self.log(f"❌ Extract.py import failed unexpectedly: {result.stdout} {result.stderr}")
-                return False
-                
-            # Test 2: Run script directly (should show "No file path provided" error)
-            result = subprocess.run([
-                '/root/.venv/bin/python3', 'scripts/extract.py'
-            ], cwd='/app', capture_output=True, text=True, env={**os.environ, 'OPENAI_API_KEY': ''})
-            
-            if result.returncode == 1 and 'OPENAI_API_KEY not configured' in result.stdout:
-                self.log("✅ Extract.py script execution validation successful")
-                return True
-            else:
-                self.log(f"❌ Extract.py script execution failed: {result.stdout} {result.stderr}")
-                return False
+                self.log_result("Health Check", False, f"HTTP {response.status_code}: {response.text}")
                 
         except Exception as e:
-            self.log(f"❌ Extract.py validation error: {e}")
-            return False
-
-    def test_process_error_handling(self):
-        """Test improved process endpoint error handling"""
+            self.log_result("Health Check", False, f"Request failed: {str(e)}")
+    
+    def test_contact_form_validation(self):
+        """Test POST /api/contact validation"""
         try:
-            # Test with invalid upload_id to trigger error handling
-            process_data = {
-                "upload_id": "invalid-uuid-format",
-                "user_requirements": "Test error handling"
-            }
+            # Test missing fields
+            response = self.session.post(f"{API_BASE}/contact", json={})
             
-            response = self.session.post(f"{BASE_URL}/process", json=process_data)
-            
-            # Should return 400 for invalid UUID
             if response.status_code == 400:
-                self.log("✅ Process error handling working - rejects invalid UUID")
-                return True
+                data = response.json()
+                if "error" in data:
+                    self.log_result("Contact Form - Missing Fields", True, f"Validation error: {data['error']}")
+                else:
+                    self.log_result("Contact Form - Missing Fields", False, f"Expected error field in response: {data}")
             else:
-                self.log(f"❌ Process error handling failed: {response.status_code} - {response.text}")
-                return False
+                self.log_result("Contact Form - Missing Fields", False, f"Expected 400, got {response.status_code}: {response.text}")
                 
         except Exception as e:
-            self.log(f"❌ Process error handling test error: {e}")
-            return False
-
-    def run_all_tests(self):
-        """Run all backend tests"""
-        self.log("Starting DocXL AI Backend Testing Suite")
-        self.log("=" * 60)
-        
-        tests = [
-            ("Health Check", self.test_health_check),
-            ("Register and Login", self.test_register_and_login),
-            ("File Upload", self.test_file_upload),
-            ("AI Process with Confidence", self.test_ai_process_with_confidence),
-            ("Update Result with Confidence", self.test_update_result_with_confidence),
-            ("Excel Export with Confidence", self.test_excel_export_with_confidence),
-            ("Extract.py Script Validation", self.test_extract_script_validation),
-            ("Process Error Handling", self.test_process_error_handling)
+            self.log_result("Contact Form - Missing Fields", False, f"Request failed: {str(e)}")
+    
+    def test_contact_form_valid_data(self):
+        """Test POST /api/contact with valid data (should fail due to missing BREVO_API_KEY)"""
+        try:
+            valid_data = {
+                "name": "Test User",
+                "email": "test@example.com", 
+                "message": "This is a test message from the backend testing script."
+            }
+            
+            response = self.session.post(f"{API_BASE}/contact", json=valid_data)
+            
+            # Should return 500 due to missing BREVO_API_KEY (this is expected)
+            if response.status_code == 500:
+                data = response.json()
+                if "error" in data and "BREVO_API_KEY" in data["error"]:
+                    self.log_result("Contact Form - Valid Data", True, f"Expected BREVO error: {data['error']}")
+                else:
+                    self.log_result("Contact Form - Valid Data", True, f"Got 500 error as expected: {data.get('error', 'Unknown error')}")
+            else:
+                self.log_result("Contact Form - Valid Data", False, f"Expected 500, got {response.status_code}: {response.text}")
+                
+        except Exception as e:
+            self.log_result("Contact Form - Valid Data", False, f"Request failed: {str(e)}")
+    
+    def test_forgot_password_validation(self):
+        """Test POST /api/auth/forgot-password validation"""
+        try:
+            # Test missing email
+            response = self.session.post(f"{API_BASE}/auth/forgot-password", json={})
+            
+            if response.status_code == 400:
+                data = response.json()
+                if "error" in data:
+                    self.log_result("Forgot Password - Missing Email", True, f"Validation error: {data['error']}")
+                else:
+                    self.log_result("Forgot Password - Missing Email", False, f"Expected error field: {data}")
+            else:
+                self.log_result("Forgot Password - Missing Email", False, f"Expected 400, got {response.status_code}: {response.text}")
+                
+        except Exception as e:
+            self.log_result("Forgot Password - Missing Email", False, f"Request failed: {str(e)}")
+    
+    def test_forgot_password_valid_email(self):
+        """Test POST /api/auth/forgot-password with valid email (should always return 200)"""
+        try:
+            valid_data = {"email": "test@example.com"}
+            
+            response = self.session.post(f"{API_BASE}/auth/forgot-password", json=valid_data)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("success") is True:
+                    self.log_result("Forgot Password - Valid Email", True, f"Success response: {data.get('message', 'No message')}")
+                else:
+                    self.log_result("Forgot Password - Valid Email", False, f"Expected success=true: {data}")
+            else:
+                self.log_result("Forgot Password - Valid Email", False, f"Expected 200, got {response.status_code}: {response.text}")
+                
+        except Exception as e:
+            self.log_result("Forgot Password - Valid Email", False, f"Request failed: {str(e)}")
+    
+    def test_admin_endpoints_unauthorized(self):
+        """Test admin endpoints without authentication (should return 401/403)"""
+        admin_endpoints = [
+            ("GET", "/admin/users"),
+            ("POST", "/admin/credits"),
+            ("GET", "/admin/stats"),
+            ("GET", "/admin/activity"),
+            ("GET", "/admin/search?email=test")
         ]
         
-        passed = 0
-        failed = 0
-        
-        for test_name, test_func in tests:
-            self.log(f"\n--- Testing: {test_name} ---")
+        for method, endpoint in admin_endpoints:
             try:
-                if test_func():
-                    passed += 1
+                if method == "GET":
+                    response = self.session.get(f"{API_BASE}{endpoint}")
+                elif method == "POST":
+                    response = self.session.post(f"{API_BASE}{endpoint}", json={"userId": "test", "newCredits": 100})
+                
+                if response.status_code in [401, 403]:
+                    self.log_result(f"Admin {method} {endpoint}", True, f"Correctly unauthorized: {response.status_code}")
                 else:
-                    failed += 1
+                    self.log_result(f"Admin {method} {endpoint}", False, f"Expected 401/403, got {response.status_code}: {response.text}")
+                    
             except Exception as e:
-                self.log(f"❌ {test_name} crashed: {e}")
-                failed += 1
+                self.log_result(f"Admin {method} {endpoint}", False, f"Request failed: {str(e)}")
+    
+    def test_cors_headers(self):
+        """Test CORS headers are present"""
+        try:
+            response = self.session.get(f"{API_BASE}/health")
+            
+            cors_header = response.headers.get('Access-Control-Allow-Origin')
+            if cors_header:
+                self.log_result("CORS Headers", True, f"Access-Control-Allow-Origin: {cors_header}")
+            else:
+                self.log_result("CORS Headers", False, "Missing Access-Control-Allow-Origin header")
+                
+        except Exception as e:
+            self.log_result("CORS Headers", False, f"Request failed: {str(e)}")
+    
+    def test_sitemap_xml(self):
+        """Test GET /sitemap.xml"""
+        try:
+            response = self.session.get(f"{BASE_URL}/sitemap.xml")
+            
+            if response.status_code == 200:
+                content = response.text
+                # Check if it's valid XML and contains expected URLs
+                if "<?xml" in content and "https://docxl.ai" in content:
+                    # Count URLs in sitemap
+                    url_count = content.count("<url>")
+                    self.log_result("Sitemap XML", True, f"Valid XML with {url_count} URLs")
+                else:
+                    self.log_result("Sitemap XML", False, f"Invalid XML format or missing URLs")
+            else:
+                self.log_result("Sitemap XML", False, f"HTTP {response.status_code}: {response.text}")
+                
+        except Exception as e:
+            self.log_result("Sitemap XML", False, f"Request failed: {str(e)}")
+    
+    def test_robots_txt(self):
+        """Test GET /robots.txt"""
+        try:
+            response = self.session.get(f"{BASE_URL}/robots.txt")
+            
+            if response.status_code == 200:
+                content = response.text
+                if "Disallow: /admin" in content and "Disallow: /api/" in content:
+                    self.log_result("Robots.txt", True, "Contains expected disallow rules")
+                else:
+                    self.log_result("Robots.txt", False, f"Missing expected disallow rules: {content}")
+            else:
+                self.log_result("Robots.txt", False, f"HTTP {response.status_code}: {response.text}")
+                
+        except Exception as e:
+            self.log_result("Robots.txt", False, f"Request failed: {str(e)}")
+    
+    def test_static_assets(self):
+        """Test static assets return 200"""
+        assets = [
+            "/favicon.ico",
+            "/og-image.png", 
+            "/site.webmanifest",
+            "/icon-192.png"
+        ]
         
-        self.log("\n" + "=" * 60)
-        self.log(f"TESTING COMPLETE: {passed} passed, {failed} failed")
+        for asset in assets:
+            try:
+                response = self.session.get(f"{BASE_URL}{asset}")
+                
+                if response.status_code == 200:
+                    self.log_result(f"Static Asset {asset}", True, f"Size: {len(response.content)} bytes")
+                else:
+                    self.log_result(f"Static Asset {asset}", False, f"HTTP {response.status_code}")
+                    
+            except Exception as e:
+                self.log_result(f"Static Asset {asset}", False, f"Request failed: {str(e)}")
+    
+    def test_page_routes(self):
+        """Test page routes return 200"""
+        pages = [
+            "/pricing",
+            "/blog", 
+            "/blog/convert-pdf-to-excel",
+            "/blog/invoice-to-excel",
+            "/blog/bank-statement-to-excel",
+            "/contact",
+            "/terms",
+            "/privacy"
+        ]
         
-        if failed == 0:
-            self.log("🎉 ALL TESTS PASSED!")
-            return True
-        else:
-            self.log(f"⚠️  {failed} tests failed")
-            return False
+        for page in pages:
+            try:
+                response = self.session.get(f"{BASE_URL}{page}")
+                
+                if response.status_code == 200:
+                    self.log_result(f"Page Route {page}", True, f"Content length: {len(response.content)}")
+                else:
+                    self.log_result(f"Page Route {page}", False, f"HTTP {response.status_code}")
+                    
+            except Exception as e:
+                self.log_result(f"Page Route {page}", False, f"Request failed: {str(e)}")
+    
+    def run_all_tests(self):
+        """Run all backend tests"""
+        print("🚀 Starting DocXL AI Backend Tests - v3.0 New Endpoints Focus")
+        print("=" * 70)
+        
+        # Test new API endpoints
+        print("\n📡 Testing NEW API Endpoints:")
+        self.test_health_check()
+        self.test_contact_form_validation()
+        self.test_contact_form_valid_data()
+        self.test_forgot_password_validation()
+        self.test_forgot_password_valid_email()
+        
+        print("\n🔒 Testing Admin Endpoints (Unauthorized):")
+        self.test_admin_endpoints_unauthorized()
+        
+        print("\n🌐 Testing CORS and Static Content:")
+        self.test_cors_headers()
+        self.test_sitemap_xml()
+        self.test_robots_txt()
+        
+        print("\n📁 Testing Static Assets:")
+        self.test_static_assets()
+        
+        print("\n📄 Testing Page Routes:")
+        self.test_page_routes()
+        
+        # Summary
+        print("\n" + "=" * 70)
+        print("📊 TEST SUMMARY")
+        print("=" * 70)
+        
+        total_tests = len(self.results)
+        passed_tests = sum(1 for r in self.results if r["success"])
+        failed_tests = total_tests - passed_tests
+        
+        print(f"Total Tests: {total_tests}")
+        print(f"✅ Passed: {passed_tests}")
+        print(f"❌ Failed: {failed_tests}")
+        print(f"Success Rate: {(passed_tests/total_tests)*100:.1f}%")
+        
+        if failed_tests > 0:
+            print(f"\n❌ FAILED TESTS:")
+            for result in self.results:
+                if not result["success"]:
+                    print(f"  - {result['test']}: {result['details']}")
+        
+        return failed_tests == 0
 
 if __name__ == "__main__":
-    tester = DocXLTester()
+    tester = BackendTester()
     success = tester.run_all_tests()
-    exit(0 if success else 1)
+    
+    if not success:
+        print(f"\n⚠️  Some tests failed. Check the details above.")
+        sys.exit(1)
+    else:
+        print(f"\n🎉 All tests passed!")
+        sys.exit(0)

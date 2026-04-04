@@ -1,8 +1,13 @@
 /*
+ * DocXL AI — API Route Handler v3.0
+ * Supabase-backed, production-hardened
+ *
  * ═══════════════════════════════════════════════════════════════════
- * SUPABASE SQL — Run this ONCE in Supabase SQL Editor before deploy:
+ * SUPABASE SQL — Run ONCE in Supabase SQL Editor:
  * ═══════════════════════════════════════════════════════════════════
  *
+ * -- 1. Drop and rewrite the credit deduction RPC
+ * DROP FUNCTION IF EXISTS deduct_credit_if_available(UUID);
  * CREATE OR REPLACE FUNCTION deduct_credit_if_available(user_uuid UUID)
  * RETURNS BOOLEAN AS $$
  * DECLARE
@@ -20,6 +25,24 @@
  * END;
  * $$ LANGUAGE plpgsql SECURITY DEFINER;
  *
+ * -- 2. Rate limits table
+ * CREATE TABLE IF NOT EXISTS rate_limits (
+ *   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ *   user_id uuid REFERENCES auth.users ON DELETE CASCADE,
+ *   action text NOT NULL,
+ *   window_start timestamptz NOT NULL DEFAULT now(),
+ *   request_count integer NOT NULL DEFAULT 1,
+ *   UNIQUE(user_id, action)
+ * );
+ * ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
+ * CREATE POLICY "service role full access" ON rate_limits
+ *   USING (auth.role() = 'service_role');
+ *
+ * -- 3. Terms acceptance columns
+ * ALTER TABLE profiles
+ *   ADD COLUMN IF NOT EXISTS terms_accepted_at timestamptz,
+ *   ADD COLUMN IF NOT EXISTS terms_accepted_ip text;
+ *
  * ═══════════════════════════════════════════════════════════════════
  */
 
@@ -31,11 +54,17 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { z } from 'zod';
 
+let Sentry = null;
+try {
+  Sentry = require('@sentry/nextjs');
+} catch (e) {
+  // Sentry not configured yet — silently skip
+}
+
 const execFileAsync = promisify(execFile);
 const TEMP_DIR = '/tmp/docxl_processing';
 
-// Export config for Vercel serverless functions
-export const maxDuration = 300; // 5 minutes for AI processing
+export const maxDuration = 300;
 export const runtime = 'nodejs';
 
 // =============================================
@@ -46,6 +75,7 @@ const registerSchema = z.object({
   email: z.string().email('Invalid email'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   name: z.string().optional(),
+  terms_accepted: z.boolean().optional(),
 });
 
 const loginSchema = z.object({
@@ -72,6 +102,21 @@ const updateResultSchema = z.object({
   }).passthrough()),
 });
 
+const contactSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  email: z.string().email('Invalid email'),
+  message: z.string().min(1, 'Message is required'),
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email('Invalid email'),
+});
+
+const adminCreditsSchema = z.object({
+  userId: z.string().uuid('Invalid user ID'),
+  newCredits: z.number().int().min(0),
+});
+
 function validate(schema, data) {
   const result = schema.safeParse(data);
   if (!result.success) return { error: result.error.errors[0].message, data: null };
@@ -79,22 +124,57 @@ function validate(schema, data) {
 }
 
 // =============================================
-// RATE LIMITING (module-level, no packages)
+// ADMIN EMAIL CONSTANT
+// =============================================
+const ADMIN_EMAIL = 'aniketar111@gmail.com';
+
+// =============================================
+// SUPABASE-BACKED RATE LIMITING (persistent)
 // =============================================
 
-const rateLimitMap = new Map();
+async function checkRateLimit(userId, maxRequests = 5, windowMs = 60000) {
+  try {
+    const supabase = getSupabaseAdmin();
+    const windowStart = new Date(Date.now() - windowMs).toISOString();
 
-function checkRateLimit(userId, maxRequests = 5, windowMs = 60000) {
-  const now = Date.now();
-  const entry = rateLimitMap.get(userId) || { count: 0, windowStart: now };
-  if (now - entry.windowStart > windowMs) {
-    entry.count = 0;
-    entry.windowStart = now;
+    // Check for existing rate limit entry within the window
+    const { data: existing } = await supabase
+      .from('rate_limits')
+      .select('id, request_count, window_start')
+      .eq('user_id', userId)
+      .eq('action', 'process')
+      .gte('window_start', windowStart)
+      .single();
+
+    if (!existing) {
+      // No entry or expired — upsert a fresh row
+      await supabase
+        .from('rate_limits')
+        .upsert({
+          user_id: userId,
+          action: 'process',
+          window_start: new Date().toISOString(),
+          request_count: 1,
+        }, { onConflict: 'user_id,action' });
+      return true;
+    }
+
+    if (existing.request_count >= maxRequests) {
+      return false; // rate limited
+    }
+
+    // Increment counter
+    await supabase
+      .from('rate_limits')
+      .update({ request_count: existing.request_count + 1 })
+      .eq('id', existing.id);
+
+    return true;
+  } catch (e) {
+    console.error('[checkRateLimit] error:', e.message);
+    // On error, allow the request (fail open)
+    return true;
   }
-  if (entry.count >= maxRequests) return false;
-  entry.count++;
-  rateLimitMap.set(userId, entry);
-  return true;
 }
 
 // =============================================
@@ -106,8 +186,11 @@ async function ensureTempDir() {
 }
 
 function corsHeaders() {
+  const origin = process.env.NODE_ENV === 'development'
+    ? 'http://localhost:3000'
+    : (process.env.CORS_ORIGINS || '*');
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   };
@@ -115,6 +198,23 @@ function corsHeaders() {
 
 function jsonResponse(body, status = 200) {
   return NextResponse.json(body, { status, headers: corsHeaders() });
+}
+
+function captureException(error) {
+  if (Sentry && typeof Sentry.captureException === 'function') {
+    Sentry.captureException(error);
+  }
+}
+
+// =============================================
+// ADMIN JWT VERIFICATION HELPER
+// =============================================
+
+async function verifyAdmin(request) {
+  const user = await getAuthUser(request);
+  if (!user) return { user: null, error: jsonResponse({ error: 'Unauthorized' }, 401) };
+  if (user.email !== ADMIN_EMAIL) return { user: null, error: jsonResponse({ error: 'Forbidden' }, 403) };
+  return { user, error: null };
 }
 
 // =============================================
@@ -129,7 +229,7 @@ async function handleRegister(request) {
       return jsonResponse({ error: validationResult.error }, 400);
     }
 
-    const { email, password, name } = validationResult.data;
+    const { email, password, name, terms_accepted } = validationResult.data;
 
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.auth.admin.createUser({
@@ -147,6 +247,20 @@ async function handleRegister(request) {
       return jsonResponse({ error: 'Registration failed. Please try again.' }, 400);
     }
 
+    // Record terms acceptance
+    if (terms_accepted && data.user) {
+      const clientIp = request.headers.get('x-forwarded-for')
+        || request.headers.get('x-real-ip')
+        || 'unknown';
+      await supabase
+        .from('profiles')
+        .update({
+          terms_accepted_at: new Date().toISOString(),
+          terms_accepted_ip: clientIp.split(',')[0].trim(),
+        })
+        .eq('id', data.user.id);
+    }
+
     const profile = await getUserProfile(data.user.id);
 
     return jsonResponse({
@@ -161,6 +275,7 @@ async function handleRegister(request) {
     }, 201);
   } catch (error) {
     console.error('[handleRegister] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
@@ -207,6 +322,7 @@ async function handleLogin(request) {
     });
   } catch (error) {
     console.error('[handleLogin] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
@@ -228,6 +344,135 @@ async function handleGetMe(request) {
       created_at: profile.created_at,
     },
   });
+}
+
+// =============================================
+// FORGOT PASSWORD (Brevo API)
+// =============================================
+
+async function handleForgotPassword(request) {
+  try {
+    const body = await request.json();
+    const validationResult = validate(forgotPasswordSchema, body);
+    if (validationResult.error) {
+      return jsonResponse({ error: validationResult.error }, 400);
+    }
+
+    const { email } = validationResult.data;
+    const supabase = getSupabaseAdmin();
+
+    // Always return success to prevent email enumeration
+    const successResponse = jsonResponse({
+      success: true,
+      message: 'If an account exists for this email, a reset link has been sent. Check your inbox and spam folder.',
+    });
+
+    try {
+      // Look up user
+      const { data: userData } = await supabase.auth.admin.listUsers();
+      const targetUser = userData?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+      if (!targetUser) return successResponse;
+
+      // Generate recovery link
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: 'recovery',
+        email: email.toLowerCase(),
+      });
+
+      if (linkError || !linkData) {
+        console.error('[handleForgotPassword] link error:', linkError);
+        return successResponse;
+      }
+
+      const resetLink = linkData.properties?.action_link || linkData.properties?.hashed_token;
+
+      // Send via Brevo API
+      const brevoKey = process.env.BREVO_API_KEY;
+      if (!brevoKey) {
+        console.error('[handleForgotPassword] BREVO_API_KEY not configured');
+        return successResponse;
+      }
+
+      const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': brevoKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: 'DocXL AI', email: 'hello@docxlai.com' },
+          to: [{ email: email.toLowerCase() }],
+          subject: 'Reset your DocXL AI password',
+          htmlContent: `<p>Click the link below to reset your password. This link expires in 1 hour.</p><p><a href="${resetLink}">Reset Password</a></p><p>If you did not request this, ignore this email.</p>`,
+        }),
+      });
+
+      if (!brevoResponse.ok) {
+        const errText = await brevoResponse.text();
+        console.error('[handleForgotPassword] Brevo error:', errText);
+      }
+    } catch (innerErr) {
+      console.error('[handleForgotPassword] inner error:', innerErr);
+    }
+
+    return successResponse;
+  } catch (error) {
+    console.error('[handleForgotPassword] error:', error);
+    captureException(error);
+    return jsonResponse({
+      success: true,
+      message: 'If an account exists for this email, a reset link has been sent. Check your inbox and spam folder.',
+    });
+  }
+}
+
+// =============================================
+// CONTACT FORM (Brevo API)
+// =============================================
+
+async function handleContact(request) {
+  try {
+    const body = await request.json();
+    const validationResult = validate(contactSchema, body);
+    if (validationResult.error) {
+      return jsonResponse({ error: validationResult.error }, 400);
+    }
+
+    const { name, email, message } = validationResult.data;
+
+    const brevoKey = process.env.BREVO_API_KEY;
+    if (!brevoKey) {
+      console.error('[handleContact] BREVO_API_KEY not configured');
+      return jsonResponse({ error: 'Failed to send message. Please email us directly at hello@docxlai.com' }, 500);
+    }
+
+    const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': brevoKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: 'DocXL AI Contact Form', email: 'hello@docxlai.com' },
+        to: [{ email: 'hello@docxlai.com' }],
+        replyTo: { email, name },
+        subject: 'New Contact Form Submission — DocXL AI',
+        htmlContent: `<p><strong>Name:</strong> ${name}</p><p><strong>Email:</strong> ${email}</p><p><strong>Message:</strong></p><p>${message}</p>`,
+      }),
+    });
+
+    if (!brevoResponse.ok) {
+      const errText = await brevoResponse.text();
+      console.error('[handleContact] Brevo error:', errText);
+      return jsonResponse({ error: 'Failed to send message' }, 500);
+    }
+
+    return jsonResponse({ success: true });
+  } catch (error) {
+    console.error('[handleContact] error:', error);
+    captureException(error);
+    return jsonResponse({ error: 'Failed to send message' }, 500);
+  }
 }
 
 // =============================================
@@ -254,7 +499,7 @@ async function handleUpload(request) {
       return jsonResponse({ error: 'Invalid file type. Supported: PDF, JPG, PNG, WEBP' }, 400);
     }
 
-    const maxSize = 100 * 1024 * 1024; // 100MB
+    const maxSize = 100 * 1024 * 1024;
     if (file.size > maxSize) {
       return jsonResponse({ error: 'File too large. Maximum 100MB allowed.' }, 400);
     }
@@ -313,6 +558,7 @@ async function handleUpload(request) {
     }, 201);
   } catch (error) {
     console.error('[handleUpload] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Upload failed. Please try again.' }, 500);
   }
 }
@@ -334,8 +580,9 @@ async function handleProcess(request) {
 
     const { upload_id, user_requirements = '' } = validationResult.data;
 
-    // Rate limit check
-    if (!checkRateLimit(user.id)) {
+    // Supabase-backed persistent rate limit check
+    const allowed = await checkRateLimit(user.id);
+    if (!allowed) {
       return new NextResponse(JSON.stringify({ error: 'Too many requests. Please wait a minute.' }), {
         status: 429,
         headers: { ...corsHeaders(), 'Retry-After': '60', 'Content-Type': 'application/json' },
@@ -344,32 +591,12 @@ async function handleProcess(request) {
 
     const supabase = getSupabaseAdmin();
 
-    // Atomic credit deduction via Supabase RPC (with fallback)
-    let creditDeducted = false;
-    try {
-      const { data: canProcess, error: rpcError } = await supabase.rpc('deduct_credit_if_available', { user_uuid: user.id });
-      if (!rpcError && canProcess) {
-        creditDeducted = true;
-      }
-    } catch (e) {
-      console.error('[handleProcess] RPC fallback:', e.message);
-    }
-
-    // Fallback: manual credit check and deduction
-    if (!creditDeducted) {
-      const profile = await getUserProfile(user.id);
-      if (!profile || profile.credits <= 0) {
-        return jsonResponse({ error: 'No credits remaining. Please upgrade to Pro.' }, 403);
-      }
-      const { error: deductErr } = await supabase
-        .from('profiles')
-        .update({ credits: Math.max(0, profile.credits - 1) })
-        .eq('id', user.id);
-      if (deductErr) {
-        console.error('[handleProcess] credit deduction error:', deductErr);
-        return jsonResponse({ error: 'Credit deduction failed. Please try again.' }, 500);
-      }
-      creditDeducted = true;
+    // Fallback manual deduction removed intentionally — it lacks row-level locking
+    // and allows race conditions. This RPC is the only safe deduction path.
+    const { data: canProcess, error: rpcError } = await supabase.rpc('deduct_credit_if_available', { user_uuid: user.id });
+    if (rpcError || !canProcess) {
+      if (rpcError) console.error('[handleProcess] RPC error:', rpcError);
+      return jsonResponse({ error: 'No credits remaining. Please upgrade to Pro.' }, 403);
     }
 
     // Fetch upload record
@@ -383,12 +610,10 @@ async function handleProcess(request) {
     if (fetchErr || !upload) return jsonResponse({ error: 'Upload not found' }, 404);
     if (upload.status === 'processing') return jsonResponse({ error: 'Already processing' }, 400);
 
-    // Set status to processing
     await supabase.from('uploads').update({ status: 'processing' }).eq('id', upload_id);
 
     let tempFilePath = null;
     try {
-      // Download file from Supabase Storage to temp
       const { data: fileBlob, error: dlErr } = await supabase.storage
         .from('uploads')
         .download(upload.file_path);
@@ -415,7 +640,8 @@ async function handleProcess(request) {
       const fileBuffer = Buffer.from(await fileBlob.arrayBuffer());
       await writeFile(tempFilePath, fileBuffer);
 
-      // Call Python extraction script with user_requirements (using execFile to prevent shell injection)
+      // Only OPENAI_API_KEY and PATH are passed to prevent secret
+      // exfiltration via a maliciously crafted document.
       const { stdout, stderr } = await execFileAsync(
         '/root/.venv/bin/python3',
         ['scripts/extract.py', tempFilePath, user_requirements || ''],
@@ -423,7 +649,10 @@ async function handleProcess(request) {
           cwd: '/app',
           timeout: 180000,
           maxBuffer: 10 * 1024 * 1024,
-          env: { ...process.env, OPENAI_API_KEY: process.env.OPENAI_API_KEY }
+          env: {
+            OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+            PATH: process.env.PATH,
+          },
         }
       );
 
@@ -450,7 +679,6 @@ async function handleProcess(request) {
 
       if (result.error) {
         await supabase.from('uploads').update({ status: 'failed', error_message: result.error }).eq('id', upload_id);
-        // Only pass error through if it does NOT contain a file path
         const safeError = /[/\\]/.test(result.error)
           ? 'Could not extract data from this document. Please try a clearer image or PDF.'
           : result.error;
@@ -475,7 +703,19 @@ async function handleProcess(request) {
         total_amount: normalizedRows.reduce((sum, r) => sum + r.amount, 0),
       };
 
-      // Insert result record
+      // Build response payload
+      const responsePayload = {
+        document_type: result.document_type || 'other',
+        rows: normalizedRows,
+        summary,
+        confidence_score: result.confidence || 0.85,
+      };
+
+      // Pass through page warning from extract.py
+      if (result.page_warning) {
+        responsePayload.warning = result.page_warning;
+      }
+
       const { data: resultRecord, error: resultErr } = await supabase
         .from('results')
         .insert({
@@ -493,10 +733,8 @@ async function handleProcess(request) {
         throw new Error('Failed to save extraction result');
       }
 
-      // Update upload status
       await supabase.from('uploads').update({ status: 'completed' }).eq('id', upload_id);
 
-      // Log usage
       await supabase.from('usage_logs').insert({
         user_id: user.id,
         action: 'process',
@@ -508,35 +746,30 @@ async function handleProcess(request) {
         result: {
           id: resultRecord.id,
           upload_id,
-          document_type: resultRecord.document_type,
-          rows: normalizedRows,
-          summary,
-          confidence_score: resultRecord.confidence_score,
+          ...responsePayload,
         },
       });
     } catch (execError) {
       console.error('[handleProcess] extraction error:', execError);
+      captureException(execError);
       await supabase.from('uploads').update({ status: 'failed', error_message: 'Processing failed' }).eq('id', upload_id);
-      
+
       // Refund credit on timeout or processing failure
-      if (creditDeducted) {
-        const profile = await getUserProfile(user.id);
-        if (profile) {
-          await supabase.from('profiles').update({ credits: profile.credits + 1 }).eq('id', user.id);
-          await supabase.from('usage_logs').insert({
-            user_id: user.id,
-            action: 'timeout_refund',
-            credits_used: -1,
-            upload_id,
-          });
-        }
+      const profile = await getUserProfile(user.id);
+      if (profile) {
+        await supabase.from('profiles').update({ credits: profile.credits + 1 }).eq('id', user.id);
+        await supabase.from('usage_logs').insert({
+          user_id: user.id,
+          action: 'timeout_refund',
+          credits_used: -1,
+          upload_id,
+        });
       }
-      
-      // Check if timeout error
+
       if (execError.killed || execError.signal === 'SIGTERM') {
         return jsonResponse({ error: 'Processing timed out. Please try with a smaller or clearer document. Your credit has been refunded.' }, 408);
       }
-      
+
       return jsonResponse({ error: 'Document processing failed. Please try again or use a clearer image. Your credit has been refunded.' }, 500);
     } finally {
       if (tempFilePath) {
@@ -545,6 +778,7 @@ async function handleProcess(request) {
     }
   } catch (error) {
     console.error('[handleProcess] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
@@ -594,6 +828,7 @@ async function handleGetResult(request, id) {
     });
   } catch (error) {
     console.error('[handleGetResult] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
@@ -620,6 +855,7 @@ async function handleGetUploads(request) {
     return jsonResponse({ uploads: uploads || [] });
   } catch (error) {
     console.error('[handleGetUploads] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
@@ -654,12 +890,13 @@ async function handleDeleteFile(request, id) {
     return jsonResponse({ message: 'File deleted' });
   } catch (error) {
     console.error('[handleDeleteFile] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
 
 // =============================================
-// UPDATE RESULT (edited rows)
+// UPDATE RESULT
 // =============================================
 
 async function handleUpdateResult(request, id) {
@@ -705,6 +942,7 @@ async function handleUpdateResult(request, id) {
     return jsonResponse({ message: 'Updated successfully' });
   } catch (error) {
     console.error('[handleUpdateResult] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }
@@ -804,6 +1042,7 @@ async function handleExportExcel(request, id) {
     });
   } catch (error) {
     console.error('[handleExportExcel] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Export failed. Please try again.' }, 500);
   }
 }
@@ -834,16 +1073,16 @@ async function handleCreateOrder(request) {
     });
   } catch (error) {
     console.error('[handleCreateOrder] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Could not initiate payment. Please try again.' }, 500);
   }
 }
 
 async function handlePaymentVerify(request) {
   try {
-    // SECURITY FIX: Extract user from JWT, don't trust user_id from frontend
     const user = await getAuthUser(request);
     if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
-    
+
     const body = await request.json();
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
@@ -859,25 +1098,24 @@ async function handlePaymentVerify(request) {
     return jsonResponse({ success: true });
   } catch (error) {
     console.error('[handlePaymentVerify] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Payment verification failed.' }, 500);
   }
 }
 
 // =============================================
-// PADDLE PAYMENT HANDLERS (GLOBAL)
+// PADDLE PAYMENT HANDLERS
 // =============================================
 
 async function handlePaddleCheckout(request) {
   const user = await getAuthUser(request);
   if (!user) return jsonResponse({ error: 'Unauthorized' }, 401);
-  
+
   try {
-    // Check if Paddle is configured
     if (!process.env.PADDLE_API_KEY || !process.env.PADDLE_PRICE_ID) {
       return jsonResponse({ error: 'Paddle payment not configured. Please use Razorpay (India) or contact support.' }, 503);
     }
 
-    // Return Paddle checkout data
     return jsonResponse({
       priceId: process.env.PADDLE_PRICE_ID,
       customData: {
@@ -887,13 +1125,13 @@ async function handlePaddleCheckout(request) {
     });
   } catch (error) {
     console.error('[handlePaddleCheckout] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Could not initiate payment. Please try again.' }, 500);
   }
 }
 
 async function handlePaddleWebhook(request) {
   try {
-    // Verify Paddle webhook signature
     const signature = request.headers.get('paddle-signature');
     if (!signature || !process.env.PADDLE_WEBHOOK_SECRET) {
       return jsonResponse({ error: 'Invalid webhook' }, 401);
@@ -901,8 +1139,7 @@ async function handlePaddleWebhook(request) {
 
     const body = await request.text();
     const crypto = await import('crypto');
-    
-    // Parse signature header: ts=timestamp;h1=signature
+
     const sigParts = signature.split(';').reduce((acc, part) => {
       const [key, value] = part.split('=');
       acc[key] = value;
@@ -914,35 +1151,24 @@ async function handlePaddleWebhook(request) {
       .digest('hex');
 
     if (expectedSig !== sigParts.h1) {
-      console.error('[handlePaddleWebhook] Invalid signature');
       return jsonResponse({ error: 'Invalid signature' }, 401);
     }
 
     const event = JSON.parse(body);
 
-    // Handle transaction.completed event
     if (event.event_type === 'transaction.completed') {
       const userId = event.data?.custom_data?.user_id;
-      if (!userId) {
-        console.error('[handlePaddleWebhook] Missing user_id in custom_data');
-        return jsonResponse({ error: 'Missing user_id' }, 400);
-      }
+      if (!userId) return jsonResponse({ error: 'Missing user_id' }, 400);
 
       const supabase = getSupabaseAdmin();
       await supabase.from('profiles').update({ plan: 'pro', credits: 300 }).eq('id', userId);
-      await supabase.from('usage_logs').insert({
-        user_id: userId,
-        action: 'upgrade',
-        credits_used: 0,
-        upload_id: null,
-      });
-
-      console.log(`[handlePaddleWebhook] Upgraded user ${userId} to Pro via Paddle`);
+      await supabase.from('usage_logs').insert({ user_id: userId, action: 'upgrade', credits_used: 0, upload_id: null });
     }
 
     return jsonResponse({ received: true });
   } catch (error) {
     console.error('[handlePaddleWebhook] error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Webhook processing failed' }, 500);
   }
 }
@@ -953,110 +1179,240 @@ async function handlePaddleWebhook(request) {
 
 async function handleCleanupCron(request) {
   const startTime = Date.now();
-  console.log('[CRON] cleanup-files: Execution started at', new Date().toISOString());
-  
   try {
-    // Verify CRON_SECRET
     const authHeader = request.headers.get('authorization');
     const cronSecret = authHeader?.replace('Bearer ', '');
-    
+
     if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
-      console.log('[CRON] cleanup-files: Unauthorized request rejected');
       return jsonResponse({ error: 'Unauthorized' }, 401);
     }
 
     const supabase = getSupabaseAdmin();
-    const cutoffDate = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48 hours ago
-    console.log('[CRON] cleanup-files: Cutoff date =', cutoffDate.toISOString());
+    const cutoffDate = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
-    // Get old uploads
     const { data: oldUploads, error: fetchError } = await supabase
       .from('uploads')
       .select('id, file_path')
       .lt('created_at', cutoffDate.toISOString())
       .limit(100);
 
-    if (fetchError) {
-      console.error('[CRON] cleanup-files: Error fetching old uploads:', fetchError);
-      throw fetchError;
-    }
+    if (fetchError) throw fetchError;
 
     let deletedCount = 0;
     if (oldUploads && oldUploads.length > 0) {
-      console.log('[CRON] cleanup-files: Found', oldUploads.length, 'files to delete');
-      
-      // Delete from storage
       const filePaths = oldUploads.map(u => u.file_path).filter(Boolean);
       if (filePaths.length > 0) {
-        const { error: storageError } = await supabase.storage.from('uploads').remove(filePaths);
-        if (storageError) {
-          console.error('[CRON] cleanup-files: Storage delete error:', storageError);
-        }
+        await supabase.storage.from('uploads').remove(filePaths);
       }
-
-      // Delete from database
       const uploadIds = oldUploads.map(u => u.id);
       await supabase.from('results').delete().in('upload_id', uploadIds);
       await supabase.from('uploads').delete().in('id', uploadIds);
-      
       deletedCount = oldUploads.length;
     }
 
-    const duration = Date.now() - startTime;
-    console.log(`[CRON] cleanup-files: Completed. Deleted ${deletedCount} files in ${duration}ms`);
+    // Clean old rate limit entries (older than 5 minutes)
+    const rateLimitCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    await supabase.from('rate_limits').delete().lt('window_start', rateLimitCutoff);
 
-    return jsonResponse({
-      success: true,
-      deleted: deletedCount,
-      cutoff: cutoffDate.toISOString(),
-      duration_ms: duration,
-    });
+    return jsonResponse({ success: true, deleted: deletedCount, duration_ms: Date.now() - startTime });
   } catch (error) {
-    console.error('[CRON] cleanup-files: Error:', error);
+    console.error('[CRON] cleanup error:', error);
+    captureException(error);
     return jsonResponse({ error: 'Cleanup failed' }, 500);
   }
 }
 
 async function handleResetCreditsCron(request) {
   const startTime = Date.now();
-  console.log('[CRON] reset-credits: Execution started at', new Date().toISOString());
-  
   try {
-    // Verify CRON_SECRET
     const authHeader = request.headers.get('authorization');
     const cronSecret = authHeader?.replace('Bearer ', '');
-    
+
     if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
-      console.log('[CRON] reset-credits: Unauthorized request rejected');
       return jsonResponse({ error: 'Unauthorized' }, 401);
     }
 
     const supabase = getSupabaseAdmin();
-
-    // Reset all Pro users to 300 credits
     const { data: updated, error: updateError } = await supabase
       .from('profiles')
       .update({ credits: 300 })
       .eq('plan', 'pro')
       .select('id');
 
-    if (updateError) {
-      console.error('[CRON] reset-credits: Update error:', updateError);
-      throw updateError;
+    if (updateError) throw updateError;
+
+    return jsonResponse({ success: true, reset_count: updated?.length || 0, duration_ms: Date.now() - startTime });
+  } catch (error) {
+    console.error('[CRON] reset error:', error);
+    captureException(error);
+    return jsonResponse({ error: 'Credit reset failed' }, 500);
+  }
+}
+
+// =============================================
+// ADMIN HANDLERS
+// =============================================
+
+async function handleAdminGetUsers(request) {
+  const { user, error } = await verifyAdmin(request);
+  if (error) return error;
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, plan, credits, created_at, full_name')
+      .order('created_at', { ascending: false });
+
+    const { data: authData } = await supabase.auth.admin.listUsers();
+    const emailMap = {};
+    if (authData?.users) {
+      authData.users.forEach(u => { emailMap[u.id] = u.email; });
     }
 
-    const resetCount = updated?.length || 0;
-    const duration = Date.now() - startTime;
-    console.log(`[CRON] reset-credits: Completed. Reset ${resetCount} Pro users in ${duration}ms`);
+    const users = (profiles || []).map(p => ({
+      id: p.id,
+      email: emailMap[p.id] || 'unknown',
+      plan: p.plan,
+      credits: p.credits,
+      name: p.full_name,
+      created_at: p.created_at,
+    }));
+
+    return jsonResponse({ users });
+  } catch (error) {
+    console.error('[adminGetUsers] error:', error);
+    captureException(error);
+    return jsonResponse({ error: 'Failed to fetch users' }, 500);
+  }
+}
+
+async function handleAdminUpdateCredits(request) {
+  const { user, error: authError } = await verifyAdmin(request);
+  if (authError) return authError;
+
+  try {
+    const body = await request.json();
+    const validationResult = validate(adminCreditsSchema, body);
+    if (validationResult.error) return jsonResponse({ error: validationResult.error }, 400);
+
+    const { userId, newCredits } = validationResult.data;
+    const supabase = getSupabaseAdmin();
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ credits: newCredits })
+      .eq('id', userId);
+
+    if (error) return jsonResponse({ error: 'Failed to update credits' }, 500);
+
+    return jsonResponse({ success: true });
+  } catch (error) {
+    console.error('[adminUpdateCredits] error:', error);
+    captureException(error);
+    return jsonResponse({ error: 'Failed to update credits' }, 500);
+  }
+}
+
+async function handleAdminGetStats(request) {
+  const { user, error } = await verifyAdmin(request);
+  if (error) return error;
+
+  try {
+    const supabase = getSupabaseAdmin();
+
+    const { count: totalUsers } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
+    const { count: totalProUsers } = await supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('plan', 'pro');
+
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+
+    const { count: filesToday } = await supabase.from('usage_logs').select('id', { count: 'exact', head: true })
+      .eq('action', 'process').gte('created_at', todayStart.toISOString());
+    const { count: filesMonth } = await supabase.from('usage_logs').select('id', { count: 'exact', head: true })
+      .eq('action', 'process').gte('created_at', monthStart.toISOString());
 
     return jsonResponse({
-      success: true,
-      reset_count: resetCount,
-      duration_ms: duration,
+      total_users: totalUsers || 0,
+      total_pro_users: totalProUsers || 0,
+      files_processed_today: filesToday || 0,
+      files_processed_this_month: filesMonth || 0,
     });
   } catch (error) {
-    console.error('[CRON] reset-credits: Error:', error);
-    return jsonResponse({ error: 'Credit reset failed' }, 500);
+    console.error('[adminGetStats] error:', error);
+    captureException(error);
+    return jsonResponse({ error: 'Failed to fetch stats' }, 500);
+  }
+}
+
+async function handleAdminGetActivity(request) {
+  const { user, error } = await verifyAdmin(request);
+  if (error) return error;
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: logs } = await supabase
+      .from('usage_logs')
+      .select('id, user_id, action, credits_used, created_at')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const { data: authData } = await supabase.auth.admin.listUsers();
+    const emailMap = {};
+    if (authData?.users) {
+      authData.users.forEach(u => { emailMap[u.id] = u.email; });
+    }
+
+    const activity = (logs || []).map(l => ({
+      ...l,
+      email: emailMap[l.user_id] || 'unknown',
+    }));
+
+    return jsonResponse({ activity });
+  } catch (error) {
+    console.error('[adminGetActivity] error:', error);
+    captureException(error);
+    return jsonResponse({ error: 'Failed to fetch activity' }, 500);
+  }
+}
+
+async function handleAdminSearch(request) {
+  const { user, error } = await verifyAdmin(request);
+  if (error) return error;
+
+  try {
+    const url = new URL(request.url);
+    const searchEmail = url.searchParams.get('email');
+    if (!searchEmail) return jsonResponse({ error: 'Email query required' }, 400);
+
+    const supabase = getSupabaseAdmin();
+    const { data: authData } = await supabase.auth.admin.listUsers();
+    const matchedUser = authData?.users?.find(u => u.email?.toLowerCase().includes(searchEmail.toLowerCase()));
+
+    if (!matchedUser) return jsonResponse({ user: null, uploads: [] });
+
+    const profile = await getUserProfile(matchedUser.id);
+    const { data: uploads } = await supabase
+      .from('uploads')
+      .select('id, file_name, status, created_at')
+      .eq('user_id', matchedUser.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    return jsonResponse({
+      user: {
+        id: matchedUser.id,
+        email: matchedUser.email,
+        plan: profile?.plan,
+        credits: profile?.credits,
+        created_at: profile?.created_at,
+      },
+      uploads: uploads || [],
+    });
+  } catch (error) {
+    console.error('[adminSearch] error:', error);
+    captureException(error);
+    return jsonResponse({ error: 'Search failed' }, 500);
   }
 }
 
@@ -1077,6 +1433,12 @@ export async function GET(request, context) {
   if (routePath.startsWith('result/')) return handleGetResult(request, pathSegments[1]);
   if (routePath.startsWith('export/excel/')) return handleExportExcel(request, pathSegments[2]);
 
+  // Admin routes
+  if (routePath === 'admin/users') return handleAdminGetUsers(request);
+  if (routePath === 'admin/stats') return handleAdminGetStats(request);
+  if (routePath === 'admin/activity') return handleAdminGetActivity(request);
+  if (routePath === 'admin/search') return handleAdminSearch(request);
+
   return jsonResponse({ error: 'Not found' }, 404);
 }
 
@@ -1087,14 +1449,19 @@ export async function POST(request, context) {
 
   if (routePath === 'auth/register') return handleRegister(request);
   if (routePath === 'auth/login') return handleLogin(request);
+  if (routePath === 'auth/forgot-password') return handleForgotPassword(request);
   if (routePath === 'upload') return handleUpload(request);
   if (routePath === 'process') return handleProcess(request);
+  if (routePath === 'contact') return handleContact(request);
   if (routePath === 'payment/create-order') return handleCreateOrder(request);
   if (routePath === 'payment/verify') return handlePaymentVerify(request);
   if (routePath === 'payment/paddle/checkout') return handlePaddleCheckout(request);
   if (routePath === 'webhooks/paddle') return handlePaddleWebhook(request);
   if (routePath === 'cron/cleanup-files' || routePath === 'cron/cleanup') return handleCleanupCron(request);
   if (routePath === 'cron/reset-credits') return handleResetCreditsCron(request);
+
+  // Admin routes
+  if (routePath === 'admin/credits') return handleAdminUpdateCredits(request);
 
   return jsonResponse({ error: 'Not found' }, 404);
 }
