@@ -139,7 +139,7 @@ export default function PrivacyPage() {
               The security and privacy of your uploaded documents is of paramount importance to us. All uploaded files are stored in encrypted cloud storage powered by Supabase, which uses AWS S3-compatible infrastructure with encryption at rest. Files are transmitted over TLS-encrypted connections at all times.
             </p>
             <p className="mb-4">
-              Uploaded files are automatically deleted from our servers within 24 hours of processing completion. This automated deletion ensures that your sensitive financial documents are not retained longer than necessary for service delivery.
+              Uploaded files are automatically deleted from our servers within 48 hours of processing completion. This automated deletion ensures that your sensitive financial documents are not retained longer than necessary for service delivery.
             </p>
             <p className="mb-4">
               The extracted structured data (rows, tables, and summaries) derived from your documents is retained in your account indefinitely until you choose to delete it. You have full control over your extracted data and may delete any file and its associated extracted results at any time from your dashboard.
@@ -247,7 +247,7 @@ export default function PrivacyPage() {
               <strong>Account data</strong> (name, email, preferences) is retained for the duration of your account plus 90 days following account deletion, after which it is permanently purged from all systems.
             </p>
             <p className="mb-4">
-              <strong>Uploaded files</strong> (PDFs, images, documents) are automatically deleted within 24 hours of processing completion. Files associated with failed processing are also deleted within this timeframe.
+              <strong>Uploaded files</strong> (PDFs, images, documents) are automatically deleted within 48 hours of processing completion. Files associated with failed processing are also deleted within this timeframe.
             </p>
             <p className="mb-4">
               <strong>Extracted data</strong> (structured rows, tables, summaries) is retained in your account until you explicitly delete it or close your account.

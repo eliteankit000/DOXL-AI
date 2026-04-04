@@ -62,12 +62,14 @@ const updateResultSchema = z.object({
   rows: z.array(z.object({
     date: z.string().optional(),
     description: z.string().optional(),
-    amount: z.number().optional(),
+    amount: z.union([z.number(), z.string()]).optional(),
     type: z.string().optional(),
     category: z.string().optional(),
-    gst: z.number().optional(),
+    gst: z.union([z.number(), z.string()]).optional(),
     reference: z.string().optional(),
-  })),
+    confidence: z.number().optional(),
+    row_number: z.number().optional(),
+  }).passthrough()),
 });
 
 function validate(schema, data) {
@@ -419,18 +421,30 @@ async function handleProcess(request) {
         ['scripts/extract.py', tempFilePath, user_requirements || ''],
         {
           cwd: '/app',
-          timeout: 120000,
+          timeout: 180000,
           maxBuffer: 10 * 1024 * 1024,
           env: { ...process.env, OPENAI_API_KEY: process.env.OPENAI_API_KEY }
         }
       );
 
+      if (stderr && stderr.includes('Error') && !stdout.trim()) {
+        console.error('[handleProcess] extract stderr:', stderr);
+        throw new Error('Extraction script error: ' + stderr.substring(0, 200));
+      }
       if (stderr) console.error('[handleProcess] extract stderr:', stderr);
 
+      if (!stdout || !stdout.trim()) {
+        throw new Error('No output from extraction script — document may be empty or corrupted');
+      }
+
       let result;
+      const trimmedOutput = stdout.trim();
+      const jsonStart = trimmedOutput.lastIndexOf('\n{');
+      const cleanOutput = jsonStart >= 0 ? trimmedOutput.substring(jsonStart + 1) : trimmedOutput;
       try {
-        result = JSON.parse(stdout.trim());
+        result = JSON.parse(cleanOutput);
       } catch (parseError) {
+        console.error('[handleProcess] parse error, raw output:', trimmedOutput.substring(0, 500));
         throw new Error('Failed to parse extraction result');
       }
 
@@ -453,6 +467,7 @@ async function handleProcess(request) {
         category: row.category || '',
         gst: parseFloat(row.gst) || 0,
         reference: row.reference || '',
+        confidence: row.confidence !== undefined ? parseFloat(row.confidence) : 0.85,
       }));
 
       const summary = result.summary || {
@@ -736,6 +751,7 @@ async function handleExportExcel(request, id) {
       { header: 'Category', key: 'category', width: 20 },
       { header: 'GST', key: 'gst', width: 12 },
       { header: 'Reference', key: 'reference', width: 20 },
+      { header: 'Confidence', key: 'confidence', width: 12 },
     ];
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -752,6 +768,7 @@ async function handleExportExcel(request, id) {
         category: row.category || '',
         gst: row.gst || 0,
         reference: row.reference || '',
+        confidence: row.confidence !== undefined ? row.confidence : '',
       });
     });
 

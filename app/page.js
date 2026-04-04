@@ -149,7 +149,7 @@ const LandingPage = ({ onGetStarted }) => (
             { icon: FileText, title: 'PDF Invoices', desc: 'Extract line items, totals, tax details from any invoice format' },
             { icon: CreditCard, title: 'Bank Statements', desc: 'Parse transactions, dates, amounts, and categories automatically' },
             { icon: Image, title: 'Screenshots & Images', desc: 'Capture data from table screenshots and receipts' },
-            { icon: Shield, title: 'Secure Processing', desc: 'Files are encrypted and auto-deleted within 24 hours' },
+            { icon: Shield, title: 'Secure Processing', desc: 'Files are encrypted and auto-deleted within 48 hours' },
           ].map((item, i) => (
             <Card key={i} className="border shadow-sm hover:shadow-md transition-shadow">
               <CardContent className="pt-6">
@@ -216,6 +216,33 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+
+  const handleGoogleAuth = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const supabase = getSupabase();
+      if (!supabase) {
+        setError('Authentication service not available.');
+        return;
+      }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+      if (error) setError(error.message);
+    } catch (err) {
+      setError('Google sign-in failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -299,6 +326,31 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
             <CardDescription>{mode === 'login' ? 'Sign in to your account' : 'Start extracting data in seconds'}</CardDescription>
           </CardHeader>
           <CardContent>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full flex items-center gap-3 h-11"
+              onClick={handleGoogleAuth}
+              disabled={loading}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+              </svg>
+              Continue with Google
+            </Button>
+
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <Separator />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">Or continue with email</span>
+              </div>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-4">
               {mode === 'register' && (
                 <div>
@@ -345,25 +397,25 @@ const Sidebar = ({ user, currentView, onNavigate, onLogout, collapsed, onToggle 
   ];
 
   return (
-    <div className={`bg-white border-r h-screen flex flex-col transition-all duration-300 ${collapsed ? 'w-16' : 'w-64'}`}>
-      <div className="p-4 flex items-center gap-2 border-b">
+    <div className={`bg-white border-r h-screen flex flex-col transition-all duration-300 overflow-hidden flex-shrink-0 ${collapsed ? 'w-16' : 'w-64'}`}>
+      <div className="p-4 flex items-center gap-2 border-b flex-shrink-0">
         <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
           <FileSpreadsheet className="w-5 h-5 text-white" />
         </div>
-        {!collapsed && <span className="font-bold text-lg">DocXL AI</span>}
-        <button onClick={onToggle} className="ml-auto p-1 hover:bg-muted rounded"><Menu className="w-4 h-4" /></button>
+        {!collapsed && <span className="font-bold text-lg whitespace-nowrap">DocXL AI</span>}
+        <button onClick={onToggle} className="ml-auto p-1 hover:bg-muted rounded flex-shrink-0"><Menu className="w-4 h-4" /></button>
       </div>
-      <nav className="flex-1 p-2 space-y-1">
+      <nav className="flex-1 p-2 space-y-1 overflow-hidden">
         {navItems.map(item => (
           <button key={item.id} onClick={() => onNavigate(item.id)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors overflow-hidden
               ${currentView === item.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
             <item.icon className="w-5 h-5 flex-shrink-0" />
-            {!collapsed && <span>{item.label}</span>}
+            {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
           </button>
         ))}
       </nav>
-      <div className="p-3 border-t">
+      <div className="p-3 border-t flex-shrink-0 overflow-hidden">
         {!collapsed && user && (
           <div className="mb-3 px-3">
             <p className="text-sm font-medium truncate">{user.name || user.email}</p>
@@ -376,9 +428,9 @@ const Sidebar = ({ user, currentView, onNavigate, onLogout, collapsed, onToggle 
           </div>
         )}
         <button onClick={onLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors overflow-hidden">
           <LogOut className="w-5 h-5 flex-shrink-0" />
-          {!collapsed && <span>Sign Out</span>}
+          {!collapsed && <span className="whitespace-nowrap">Sign Out</span>}
         </button>
       </div>
     </div>
@@ -398,7 +450,7 @@ const UploadBox = ({ onUploadComplete, disabled }) => {
     const validExts = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     if (!validExts.includes(ext)) { setError('Invalid file type. Supported: PDF, JPG, PNG, WEBP'); return; }
-    if (file.size > 10 * 1024 * 1024) { setError('File too large. Maximum 10MB.'); return; }
+    if (file.size > 100 * 1024 * 1024) { setError('File too large. Maximum 100MB.'); return; }
     setError('');
     setUploading(true);
     setUploadProgress(30);
@@ -445,7 +497,7 @@ const UploadBox = ({ onUploadComplete, disabled }) => {
               <div className="flex gap-2">
                 {['PDF', 'JPG', 'PNG'].map(t => (<Badge key={t} variant="secondary" className="text-xs">{t}</Badge>))}
               </div>
-              <p className="text-xs text-muted-foreground mt-3">Max file size: 10MB</p>
+              <p className="text-xs text-muted-foreground mt-3">Max file size: 100MB</p>
             </>
           )}
         </div>
@@ -531,94 +583,307 @@ const ProcessingView = ({ upload, onComplete, onError }) => {
 };
 
 // ============= EDITABLE DATA TABLE =============
-const DataTable = ({ data, onUpdate }) => {
-  const [rows, setRows] = useState(data?.rows || []);
-  const [editingCell, setEditingCell] = useState(null);
-  const [editValue, setEditValue] = useState('');
+const CONFIDENCE_THRESHOLD_LOW = 0.50;
+const CONFIDENCE_THRESHOLD_MED = 0.75;
 
-  useEffect(() => { setRows(data?.rows || []); }, [data]);
+const ConfidenceBadge = ({ score }) => {
+  if (score === undefined || score === null) return null;
+  if (score < CONFIDENCE_THRESHOLD_LOW) return (
+    <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+      <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"/>Low
+    </span>
+  );
+  if (score < CONFIDENCE_THRESHOLD_MED) return (
+    <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">
+      <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block"/>Med
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">
+      <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"/>OK
+    </span>
+  );
+};
 
-  const startEdit = (rowIndex, field) => {
-    setEditingCell({ rowIndex, field });
-    setEditValue(String(rows[rowIndex][field] || ''));
+const EditableCell = ({ value, onChange, type = 'text', className = '' }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value ?? ''));
+  const inputRef = useRef(null);
+
+  useEffect(() => { setDraft(String(value ?? '')); }, [value]);
+  useEffect(() => { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    let finalVal = draft;
+    if (type === 'number') {
+      const n = parseFloat(draft.replace(/[^\d.]/g, ''));
+      finalVal = isNaN(n) ? 0 : n;
+    }
+    onChange(finalVal);
   };
 
-  const saveEdit = () => {
-    if (!editingCell) return;
-    const { rowIndex, field } = editingCell;
-    const newRows = [...rows];
-    let value = editValue;
-    if (field === 'amount' || field === 'gst') value = parseFloat(editValue) || 0;
-    newRows[rowIndex] = { ...newRows[rowIndex], [field]: value };
-    setRows(newRows);
-    setEditingCell(null);
-    if (onUpdate) onUpdate(newRows);
+  const handleKey = (e) => {
+    if (e.key === 'Enter') commit();
+    if (e.key === 'Escape') { setDraft(String(value ?? '')); setEditing(false); }
+    if (e.key === 'Tab') commit();
+  };
+
+  if (editing) return (
+    <input
+      ref={inputRef}
+      className={`w-full px-2 py-1 text-sm border border-primary rounded focus:outline-none focus:ring-1 focus:ring-primary bg-background ${className}`}
+      value={draft}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={handleKey}
+      type={type === 'number' ? 'number' : 'text'}
+      step={type === 'number' ? '0.01' : undefined}
+    />
+  );
+
+  return (
+    <div
+      className={`px-2 py-1 text-sm cursor-pointer rounded hover:bg-primary/5 min-h-[28px] flex items-center group ${className}`}
+      onClick={() => setEditing(true)}
+      title="Click to edit"
+    >
+      <span className={`flex-1 ${!value && value !== 0 ? 'text-muted-foreground italic' : ''}`}>
+        {type === 'number' ? (parseFloat(value) || 0).toFixed(2) : (value || '\u2014')}
+      </span>
+      <Edit3 className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 ml-1 flex-shrink-0" />
+    </div>
+  );
+};
+
+const TypeSelect = ({ value, onChange }) => {
+  const options = ['debit', 'credit', 'expense', 'income'];
+  const colors = { debit: 'text-red-600', credit: 'text-green-600', expense: 'text-orange-600', income: 'text-blue-600' };
+  return (
+    <select
+      className={`text-xs px-1 py-1 rounded border border-input bg-background cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary ${colors[value] || ''}`}
+      value={value || 'debit'}
+      onChange={e => onChange(e.target.value)}
+    >
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+};
+
+const DataTable = ({ data, onUpdate }) => {
+  const [rows, setRows] = useState([]);
+  const [sortConfig, setSortConfig] = useState({ key: null, dir: 'asc' });
+  const [filterLowConf, setFilterLowConf] = useState(false);
+
+  useEffect(() => {
+    const incoming = (data?.rows || []).map((r, i) => ({ ...r, _id: i + '_' + Date.now() }));
+    setRows(incoming);
+  }, [data]);
+
+  const updateRow = (index, field, value) => {
+    setRows(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      if (onUpdate) onUpdate(updated.map(({ _id, ...rest }) => rest));
+      return updated;
+    });
   };
 
   const addRow = () => {
-    const newRow = { row_number: rows.length + 1, date: '', description: '', amount: 0, type: 'debit', category: '', gst: 0, reference: '' };
-    const newRows = [...rows, newRow];
-    setRows(newRows);
-    if (onUpdate) onUpdate(newRows);
+    const newRow = {
+      _id: 'new_' + Date.now(),
+      row_number: rows.length + 1,
+      date: '',
+      description: '',
+      amount: 0,
+      type: 'debit',
+      category: '',
+      gst: 0,
+      reference: '',
+      confidence: 1.0,
+    };
+    setRows(prev => {
+      const updated = [...prev, newRow];
+      if (onUpdate) onUpdate(updated.map(({ _id, ...rest }) => rest));
+      return updated;
+    });
   };
 
   const deleteRow = (index) => {
-    const newRows = rows.filter((_, i) => i !== index);
-    setRows(newRows);
-    if (onUpdate) onUpdate(newRows);
+    setRows(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      if (onUpdate) onUpdate(updated.map(({ _id, ...rest }) => rest));
+      return updated;
+    });
   };
 
-  const columns = [
-    { key: 'date', label: 'Date', width: 'w-28' },
-    { key: 'description', label: 'Description', width: 'w-64' },
-    { key: 'amount', label: 'Amount', width: 'w-28', align: 'right' },
-    { key: 'type', label: 'Type', width: 'w-24' },
-    { key: 'category', label: 'Category', width: 'w-32' },
-    { key: 'gst', label: 'GST', width: 'w-24', align: 'right' },
-    { key: 'reference', label: 'Ref', width: 'w-28' },
-  ];
+  const duplicateRow = (index) => {
+    setRows(prev => {
+      const row = { ...prev[index], _id: 'dup_' + Date.now() };
+      const updated = [...prev.slice(0, index + 1), row, ...prev.slice(index + 1)];
+      if (onUpdate) onUpdate(updated.map(({ _id, ...rest }) => rest));
+      return updated;
+    });
+  };
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const displayRows = [...rows]
+    .filter(r => !filterLowConf || (r.confidence ?? 1) < CONFIDENCE_THRESHOLD_MED)
+    .sort((a, b) => {
+      if (!sortConfig.key) return 0;
+      const av = a[sortConfig.key], bv = b[sortConfig.key];
+      const cmp = typeof av === 'number' ? av - bv : String(av || '').localeCompare(String(bv || ''));
+      return sortConfig.dir === 'asc' ? cmp : -cmp;
+    });
+
+  const lowConfCount = rows.filter(r => (r.confidence ?? 1) < CONFIDENCE_THRESHOLD_MED).length;
+
+  const SortHeader = ({ col, label, className = '' }) => (
+    <div
+      className={`flex items-center gap-1 cursor-pointer select-none hover:text-foreground ${className}`}
+      onClick={() => handleSort(col)}
+    >
+      {label}
+      {sortConfig.key === col && <span className="text-xs">{sortConfig.dir === 'asc' ? '\u2191' : '\u2193'}</span>}
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      <ScrollArea className="w-full">
-        <div className="min-w-[800px]">
-          <div className="bg-primary text-primary-foreground rounded-t-lg">
-            <div className="flex items-center text-sm font-medium">
-              <div className="w-10 px-3 py-3">#</div>
-              {columns.map(col => (<div key={col.key} className={`${col.width} px-3 py-3 ${col.align === 'right' ? 'text-right' : ''}`}>{col.label}</div>))}
-              <div className="w-16 px-3 py-3"></div>
-            </div>
-          </div>
-          <div className="border border-t-0 rounded-b-lg divide-y">
-            {rows.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground">No data extracted. Try reprocessing.</div>
-            ) : rows.map((row, rowIndex) => (
-              <div key={rowIndex} className="flex items-center hover:bg-muted/30 transition-colors group">
-                <div className="w-10 px-3 py-2 text-xs text-muted-foreground">{rowIndex + 1}</div>
-                {columns.map(col => (
-                  <div key={col.key} className={`${col.width} px-3 py-2 text-sm cursor-pointer ${col.align === 'right' ? 'text-right' : ''} ${editingCell?.rowIndex === rowIndex && editingCell?.field === col.key ? '' : 'hover:bg-primary/5 rounded'}`}
-                    onClick={() => startEdit(rowIndex, col.key)}>
-                    {editingCell?.rowIndex === rowIndex && editingCell?.field === col.key ? (
-                      <Input className="h-7 text-sm" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit}
-                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditingCell(null); }} autoFocus />
-                    ) : (
-                      <span className={!row[col.key] && row[col.key] !== 0 ? 'text-muted-foreground italic' : ''}>
-                        {col.key === 'amount' || col.key === 'gst' ? (typeof row[col.key] === 'number' ? row[col.key].toFixed(2) : row[col.key] || '0.00') : (row[col.key] || '-')}
-                      </span>
-                    )}
-                  </div>
-                ))}
-                <div className="w-16 px-3 py-2">
-                  <button onClick={() => deleteRow(rowIndex)} className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded">
-                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+    <div className="space-y-3">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          {lowConfCount > 0 && (
+            <button
+              onClick={() => setFilterLowConf(!filterLowConf)}
+              className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${filterLowConf ? 'bg-yellow-100 border-yellow-300 text-yellow-800' : 'border-input text-muted-foreground hover:bg-muted'}`}
+            >
+              {filterLowConf ? `Showing ${lowConfCount} low-confidence rows` : `\u26A0 ${lowConfCount} rows need review`}
+            </button>
+          )}
+          {filterLowConf && (
+            <button onClick={() => setFilterLowConf(false)} className="text-xs text-muted-foreground hover:text-foreground">
+              Show all
+            </button>
+          )}
         </div>
-      </ScrollArea>
-      <Button variant="outline" size="sm" onClick={addRow}><Plus className="w-4 h-4 mr-1" /> Add Row</Button>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block"/>Low confidence</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block"/>Medium</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-400 inline-block"/>High</span>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[900px] border-collapse">
+          <thead>
+            <tr className="bg-primary text-primary-foreground text-xs">
+              <th className="w-8 px-2 py-3 text-center font-medium">#</th>
+              <th className="px-2 py-3 text-left font-medium min-w-[100px]"><SortHeader col="date" label="Date"/></th>
+              <th className="px-2 py-3 text-left font-medium min-w-[200px]"><SortHeader col="description" label="Description"/></th>
+              <th className="px-2 py-3 text-right font-medium min-w-[100px]"><SortHeader col="amount" label="Amount"/></th>
+              <th className="px-2 py-3 text-left font-medium w-24">Type</th>
+              <th className="px-2 py-3 text-left font-medium min-w-[100px]">Category</th>
+              <th className="px-2 py-3 text-right font-medium w-20"><SortHeader col="gst" label="GST"/></th>
+              <th className="px-2 py-3 text-left font-medium w-24">Ref</th>
+              <th className="px-2 py-3 text-center font-medium w-16">Score</th>
+              <th className="px-2 py-3 w-20"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.length === 0 ? (
+              <tr><td colSpan={10} className="py-12 text-center text-muted-foreground text-sm">No data rows. Click &quot;Add Row&quot; to start.</td></tr>
+            ) : displayRows.map((row, visIdx) => {
+              const realIndex = rows.findIndex(r => r._id === row._id);
+              const conf = row.confidence ?? 1;
+              const rowBg = conf < CONFIDENCE_THRESHOLD_LOW
+                ? 'bg-red-50/60 hover:bg-red-50'
+                : conf < CONFIDENCE_THRESHOLD_MED
+                  ? 'bg-yellow-50/40 hover:bg-yellow-50/60'
+                  : 'hover:bg-muted/30';
+              return (
+                <tr key={row._id} className={`border-b transition-colors group ${rowBg}`}>
+                  <td className="px-2 py-1 text-xs text-muted-foreground text-center">{visIdx + 1}</td>
+                  <td className="px-0 py-1">
+                    <EditableCell value={row.date} onChange={v => updateRow(realIndex, 'date', v)} />
+                  </td>
+                  <td className="px-0 py-1">
+                    <EditableCell value={row.description} onChange={v => updateRow(realIndex, 'description', v)} />
+                  </td>
+                  <td className="px-0 py-1">
+                    <EditableCell value={row.amount} type="number" onChange={v => updateRow(realIndex, 'amount', v)} className="text-right" />
+                  </td>
+                  <td className="px-2 py-1">
+                    <TypeSelect value={row.type} onChange={v => updateRow(realIndex, 'type', v)} />
+                  </td>
+                  <td className="px-0 py-1">
+                    <EditableCell value={row.category} onChange={v => updateRow(realIndex, 'category', v)} />
+                  </td>
+                  <td className="px-0 py-1">
+                    <EditableCell value={row.gst} type="number" onChange={v => updateRow(realIndex, 'gst', v)} className="text-right" />
+                  </td>
+                  <td className="px-0 py-1">
+                    <EditableCell value={row.reference} onChange={v => updateRow(realIndex, 'reference', v)} />
+                  </td>
+                  <td className="px-2 py-1 text-center">
+                    <ConfidenceBadge score={conf} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => duplicateRow(realIndex)}
+                        className="p-1 hover:bg-blue-100 rounded"
+                        title="Duplicate row"
+                      >
+                        <Plus className="w-3 h-3 text-blue-500" />
+                      </button>
+                      <button
+                        onClick={() => deleteRow(realIndex)}
+                        className="p-1 hover:bg-red-100 rounded"
+                        title="Delete row"
+                      >
+                        <Trash2 className="w-3 h-3 text-destructive" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {displayRows.length > 0 && (
+            <tfoot>
+              <tr className="border-t bg-muted/50">
+                <td colSpan={3} className="px-4 py-2 text-xs font-medium text-right text-muted-foreground">Totals:</td>
+                <td className="px-2 py-2 text-xs font-semibold text-right">
+                  {displayRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0).toFixed(2)}
+                </td>
+                <td/>
+                <td/>
+                <td className="px-2 py-2 text-xs font-semibold text-right">
+                  {displayRows.reduce((s, r) => s + (parseFloat(r.gst) || 0), 0).toFixed(2)}
+                </td>
+                <td colSpan={3}/>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Button variant="outline" size="sm" onClick={addRow}>
+          <Plus className="w-4 h-4 mr-1" /> Add Row
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Click any cell to edit &middot; Tab/Enter to confirm &middot; Esc to cancel
+        </p>
+      </div>
     </div>
   );
 };
@@ -642,12 +907,20 @@ const ResultView = ({ result, onBack }) => {
 
   const handleExportExcel = async () => {
     try {
+      // Save current edits first
+      await handleSave();
       const res = await apiFetch(`/export/excel/${result.upload_id}`);
       if (!res.ok) throw new Error('Export failed');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `docxl_export_${Date.now()}.xlsx`; a.click(); URL.revokeObjectURL(url);
-    } catch (err) { console.error('Export error:', err); }
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `docxl_export_${Date.now()}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export error:', err);
+    }
   };
 
   const handleExportJSON = () => {
@@ -884,6 +1157,23 @@ const App = () => {
         setView('landing');
       } else if (event === 'TOKEN_REFRESHED' && newSession) {
         setSession(newSession);
+      } else if (event === 'SIGNED_IN' && newSession) {
+        setSession(newSession);
+        if (!user) {
+          try {
+            const res = await fetch(`${API_BASE}/auth/me`, {
+              headers: { 'Authorization': `Bearer ${newSession.access_token}` },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              setUser(data.user);
+              setView('dashboard');
+              fetchUploads(newSession.access_token);
+            }
+          } catch (err) {
+            console.error('SIGNED_IN handler error:', err);
+          }
+        }
       }
     });
 

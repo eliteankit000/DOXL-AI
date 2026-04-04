@@ -261,7 +261,7 @@ backend:
     file: "app/api/[[...path]]/route.js"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
         - working: true
         - agent: "main"
@@ -269,6 +269,45 @@ backend:
         - working: true
         - agent: "testing"
         - comment: "✅ TESTED: Update result successful. Edited rows data saved properly, returns success message."
+        - working: true
+        - agent: "main"
+        - comment: "FIX: Updated Zod schema to accept confidence field (number, optional) and row_number (number, optional) with .passthrough(). Also amount/gst now accept string|number union to handle inline editing."
+
+  - task: "AI Process (Document Processing Error Fix)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "FIX 5: Increased Python script timeout from 120s to 180s. Added better stderr capture (only throws if Error in stderr AND no stdout). Added empty stdout check before JSON.parse. Added defensive JSON parsing with lastIndexOf for clean output extraction. Now normalizedRows include confidence field from extraction."
+
+  - task: "Excel Export (Confidence Column)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "FIX 7: Added 'Confidence' column to Excel export worksheet. worksheet.columns and addRow() now include confidence field."
+
+  - task: "Extract.py Full Rewrite (7-Step Pipeline)"
+    implemented: true
+    working: true
+    file: "scripts/extract.py"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "FIX 6: Complete rewrite with 7-step architecture: Detect (keyword matching) → Dual Extract (rule-based + AI) → Validate (type/date/amount normalization) → Normalize → Score (per-row confidence) → Retry (fallback prompt). Uses AsyncOpenAI with gpt-4o. Handles text PDFs via pdfplumber, scanned PDFs via page-to-image, and direct images. Dedup, category inference, defensive JSON parsing."
 
 metadata:
   created_by: "main_agent"
@@ -450,14 +489,17 @@ metadata:
 
 test_plan:
   current_focus:
-    - "All NEW production readiness features tested successfully"
+    - "Update Result schema with confidence field"
+    - "Document Processing Error Fix (timeout, stderr, JSON parsing)"
+    - "Excel Export Confidence Column"
+    - "Extract.py 7-Step Pipeline"
   stuck_tasks: []
   test_all: false
   test_priority: "critical_first"
 
 agent_communication:
     - agent: "main"
-    - message: "MAJOR UPDATE: Added Zod validation, rate limiting, atomic credit deduction (Supabase RPC), temp file cleanup, safe error messages, Razorpay payment (create-order + verify), user_requirements passing to Python. Rewrote extract.py with 3-pass pipeline (detect→extract→validate). Created Footer, Privacy, Contact, Terms pages. Updated page.js with token refresh, RequirementsField, Razorpay checkout. RAZORPAY keys in .env. SQL function run by user. Test all existing endpoints still work + new payment endpoints."
+    - message: "COMPREHENSIVE UPDATE v3.0: (1) Footer fixes - removed Coming Soon badge from TOS, removed Secured By line, removed 7-day money back, replaced long copyright with short. (2) Sidebar fix - added overflow-hidden, whitespace-nowrap, flex-shrink-0 for proper collapsed state. (3) Google OAuth - added Continue with Google button + OR divider + SIGNED_IN handler + /auth/callback page. (4) Upload limit 10MB→100MB. (5) Document processing error fix - timeout 120s→180s, better stderr capture, empty stdout check, defensive JSON parsing. (6) Extract.py full rewrite with 7-step architecture using AsyncOpenAI directly. (7) Editable DataTable with confidence badges, inline editing, sort, filter, duplicate, type select. (8) Privacy Policy 24h→48h. (9) SEO meta tags + structured data in layout.js. (10) Removed output:standalone from next.config.js. Test the backend changes: Update Result schema, Excel confidence column, process error handling improvements."
     - agent: "testing"
     - message: "✅ BACKEND TESTING COMPLETE: All 11 backend endpoints tested successfully (13/13 tests passed). Supabase migration fully verified. Health check confirms Supabase backend. Auth flow working (register/login/me). File upload to Supabase Storage working. AI processing extracts data correctly and deducts credits. Excel export generates proper xlsx files. CRUD operations on uploads/results working. All endpoints use proper Supabase authentication. No critical issues found."
     - agent: "testing"
