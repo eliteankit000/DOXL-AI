@@ -8,7 +8,7 @@ import json
 import uuid
 
 # Configuration
-BASE_URL = "https://pdf-intel-4.preview.emergentagent.com/api"
+BASE_URL = "https://excel-generator-28.preview.emergentagent.com/api"
 HEADERS = {"Content-Type": "application/json"}
 
 def test_fallback_credit_deduction():
