@@ -260,6 +260,80 @@ async function verifyAdmin(request) {
 }
 
 // =============================================
+// GEO DETECTION (IP-based location for pricing)
+// =============================================
+
+async function handleGeoDetect(request) {
+  try {
+    // Get client IP from headers
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || request.headers.get('x-real-ip')
+      || request.headers.get('cf-connecting-ip')
+      || '';
+
+    // Default to global pricing
+    let country = 'US';
+    let currency = 'USD';
+    let price = 9;
+    let priceDisplay = '$9';
+    let region = 'global';
+
+    if (ip && ip !== '127.0.0.1' && ip !== '::1') {
+      try {
+        // Use free IP geolocation API
+        const geoRes = await fetch(`https://ipapi.co/${ip}/json/`, {
+          headers: { 'User-Agent': 'DocXL-AI/1.0' },
+          signal: AbortSignal.timeout(3000),
+        });
+        if (geoRes.ok) {
+          const geoData = await geoRes.json();
+          country = geoData.country_code || 'US';
+          if (country === 'IN') {
+            currency = 'INR';
+            price = 699;
+            priceDisplay = '\u20B9699';
+            region = 'india';
+          }
+        }
+      } catch (geoErr) {
+        console.error('[handleGeoDetect] GeoIP error (non-fatal):', geoErr.message);
+        // Fallback: check timezone or accept-language hints
+        const acceptLang = request.headers.get('accept-language') || '';
+        const timezone = request.headers.get('x-timezone') || '';
+        if (acceptLang.includes('hi') || acceptLang.includes('en-IN') || timezone.includes('Kolkata') || timezone.includes('Asia/Calcutta')) {
+          currency = 'INR';
+          price = 699;
+          priceDisplay = '\u20B9699';
+          region = 'india';
+          country = 'IN';
+        }
+      }
+    }
+
+    return jsonResponse({
+      country,
+      currency,
+      price,
+      priceDisplay,
+      region,
+      plan: 'pro',
+      interval: 'month',
+    });
+  } catch (error) {
+    console.error('[handleGeoDetect] error:', error);
+    return jsonResponse({
+      country: 'US',
+      currency: 'USD',
+      price: 9,
+      priceDisplay: '$9',
+      region: 'global',
+      plan: 'pro',
+      interval: 'month',
+    });
+  }
+}
+
+// =============================================
 // AUTH HANDLERS
 // =============================================
 
@@ -756,12 +830,46 @@ async function handleProcess(request) {
         throw new Error('Failed to parse extraction result');
       }
 
-      if (result.error) {
-        await supabase.from('uploads').update({ status: 'failed', error_message: result.error }).eq('id', upload_id);
-        const safeError = /[/\\]/.test(result.error)
-          ? 'Could not extract data from this document. Please try a clearer image or PDF.'
-          : result.error;
-        return jsonResponse({ error: safeError }, 422);
+      // NEVER FAIL: even if result has error, check for partial rows
+      if (result.error && (!result.rows || result.rows.length === 0)) {
+        // Only fail if truly no data at all - which shouldn't happen with v3 extract.py
+        await supabase.from('uploads').update({ status: 'partial', error_message: result.error }).eq('id', upload_id);
+        // Still try to return something useful
+        const fallbackRows = [{
+          row_number: 1,
+          date: '',
+          description: 'Document uploaded but extraction incomplete. Please try again or edit manually.',
+          amount: 0,
+          type: 'other',
+          category: 'other',
+          gst: 0,
+          reference: '',
+          confidence: 0.05,
+        }];
+        const { data: partialRecord } = await supabase
+          .from('results')
+          .insert({
+            upload_id,
+            document_type: 'other',
+            structured_json: { rows: fallbackRows },
+            summary: { total_rows: 1, total_amount: 0 },
+            confidence_score: 0.05,
+          })
+          .select()
+          .single();
+
+        return jsonResponse({
+          result: {
+            id: partialRecord?.id || upload_id,
+            upload_id,
+            document_type: 'other',
+            rows: fallbackRows,
+            summary: { total_rows: 1, total_amount: 0 },
+            confidence_score: 0.05,
+            partial: true,
+            partial_message: 'Partial result ready — you can edit the data manually.',
+          },
+        });
       }
 
       // Normalize rows
@@ -786,11 +894,18 @@ async function handleProcess(request) {
         document_type: result.document_type || 'other',
         rows: normalizedRows,
         summary,
-        confidence_score: result.confidence || 0.85,
+        confidence_score: result.confidence || result.confidence_score || 0.85,
       };
 
       if (result.page_warning) {
         responsePayload.warning = result.page_warning;
+      }
+      if (result.partial) {
+        responsePayload.partial = true;
+        responsePayload.partial_message = result.partial_message || 'Partial result ready — you can edit the data.';
+      }
+      if (result.processing_time_seconds) {
+        responsePayload.processing_time_seconds = result.processing_time_seconds;
       }
 
       const { data: resultRecord, error: resultErr } = await supabase
@@ -829,25 +944,86 @@ async function handleProcess(request) {
     } catch (execError) {
       console.error('[handleProcess] extraction error:', execError);
       captureException(execError);
-      await supabase.from('uploads').update({ status: 'failed', error_message: 'Processing failed' }).eq('id', upload_id);
 
-      // Refund credit on timeout or processing failure
-      const profile = await getUserProfile(user.id);
-      if (profile) {
-        await supabase.from('profiles').update({ credits: profile.credits + 1 }).eq('id', user.id);
-        await supabase.from('usage_logs').insert({
-          user_id: user.id,
-          action: 'timeout_refund',
-          credits_used: -1,
-          upload_id,
+      // NEVER FAIL: Try to return partial result instead of error
+      const isTimeout = execError.killed || execError.signal === 'SIGTERM';
+      const partialRows = [{
+        row_number: 1,
+        date: '',
+        description: isTimeout
+          ? 'Processing timed out. Document may be too large or complex. Try a clearer image or smaller PDF.'
+          : 'Extraction encountered an issue. Please try again or edit this data manually.',
+        amount: 0,
+        type: 'other',
+        category: 'other',
+        gst: 0,
+        reference: '',
+        confidence: 0.05,
+      }];
+
+      // Save partial result to DB
+      try {
+        const { data: partialRecord } = await supabase
+          .from('results')
+          .insert({
+            upload_id,
+            document_type: 'other',
+            structured_json: { rows: partialRows },
+            summary: { total_rows: 1, total_amount: 0 },
+            confidence_score: 0.05,
+          })
+          .select()
+          .single();
+
+        await supabase.from('uploads').update({ status: 'partial' }).eq('id', upload_id);
+
+        // Refund credit on timeout or processing failure
+        const profile = await getUserProfile(user.id);
+        if (profile) {
+          await supabase.from('profiles').update({ credits: profile.credits + 1 }).eq('id', user.id);
+          await supabase.from('usage_logs').insert({
+            user_id: user.id,
+            action: 'timeout_refund',
+            credits_used: -1,
+            upload_id,
+          });
+        }
+
+        return jsonResponse({
+          result: {
+            id: partialRecord?.id || upload_id,
+            upload_id,
+            document_type: 'other',
+            rows: partialRows,
+            summary: { total_rows: 1, total_amount: 0 },
+            confidence_score: 0.05,
+            partial: true,
+            partial_message: isTimeout
+              ? 'Processing timed out. Your credit has been refunded. Partial result is shown — you can edit it.'
+              : 'Extraction had issues. Your credit has been refunded. You can edit the data manually.',
+          },
+        });
+      } catch (innerErr) {
+        console.error('[handleProcess] partial save failed:', innerErr);
+        // Absolute last resort: refund and return basic partial
+        const profile = await getUserProfile(user.id);
+        if (profile) {
+          await supabase.from('profiles').update({ credits: profile.credits + 1 }).eq('id', user.id);
+        }
+        await supabase.from('uploads').update({ status: 'failed' }).eq('id', upload_id);
+        return jsonResponse({
+          result: {
+            id: upload_id,
+            upload_id,
+            document_type: 'other',
+            rows: partialRows,
+            summary: { total_rows: 1, total_amount: 0 },
+            confidence_score: 0.05,
+            partial: true,
+            partial_message: 'Extraction failed. Your credit has been refunded.',
+          },
         });
       }
-
-      if (execError.killed || execError.signal === 'SIGTERM') {
-        return jsonResponse({ error: 'Processing timed out. Please try with a smaller or clearer document. Your credit has been refunded.' }, 408);
-      }
-
-      return jsonResponse({ error: 'Document processing failed. Please try again or use a clearer image. Your credit has been refunded.' }, 500);
     } finally {
       if (tempFilePath) {
         try { await unlink(tempFilePath); } catch (e) {}
@@ -1504,6 +1680,7 @@ export async function GET(request, context) {
   if (routePath === '' || routePath === 'health') {
     return jsonResponse({ status: 'ok', service: 'DocXL AI API', backend: 'supabase' });
   }
+  if (routePath === 'geo') return handleGeoDetect(request);
   if (routePath === 'auth/me') return handleGetMe(request);
   if (routePath === 'uploads') return handleGetUploads(request);
   if (routePath.startsWith('result/')) return handleGetResult(request, pathSegments[1]);
