@@ -9,7 +9,7 @@ import json
 import os
 
 # Configuration
-BASE_URL = "https://docxl-extract.preview.emergentagent.com/api"
+BASE_URL = "https://data-grid-ai.preview.emergentagent.com/api"
 CRON_SECRET = "docxl_cron_2024_secure_9k3m2p1x"  # From previous tests
 
 class CronTester:
