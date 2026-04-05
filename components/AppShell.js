@@ -16,7 +16,7 @@ import {
   FileSpreadsheet, Upload, Zap, Shield, ArrowRight, Check, X, Loader2,
   Download, Trash2, Eye, History, CreditCard, LogOut, Menu,
   FileText, Image, ChevronRight, LayoutDashboard, Clock, Edit3,
-  Plus, Minus, RefreshCw, FileDown, BarChart3, Sparkles, ChevronDown, Info, ShieldCheck
+  Plus, Minus, RefreshCw, FileDown, BarChart3, Sparkles, ChevronDown, Info, ShieldCheck, Maximize2
 } from 'lucide-react';
 
 // Dynamic import of SpreadsheetEditor to avoid SSR issues with AG Grid
@@ -1194,154 +1194,49 @@ const DataTable = ({ data, onUpdate }) => {
   );
 };
 
-// ============= RESULT VIEW (Handsontable Spreadsheet) =============
+// ============= RESULT VIEW (CLEAN SPREADSHEET ONLY) =============
 const ResultView = ({ result, onBack }) => {
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [currentRows, setCurrentRows] = useState(result?.rows || []);
   const spreadsheetRef = useRef(null);
 
-  const handleUpdate = (newRows) => { setCurrentRows(newRows); setSaved(false); };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await apiFetch(`/result/${result.upload_id}`, { method: 'PUT', body: JSON.stringify({ rows: currentRows }) });
-      if (res.ok) { setSaved(true); setTimeout(() => setSaved(false), 3000); }
-    } catch (err) { console.error('Save failed:', err); }
-    finally { setSaving(false); }
+  const handleUpdate = (newRows) => {
+    setCurrentRows(newRows);
   };
 
   const handleExportExcel = async () => {
     // Client-side Excel export via SpreadsheetEditor (SheetJS)
     const editor = spreadsheetRef.current;
     if (editor && editor.exportExcel) {
-      const success = await editor.exportExcel(`docxl_export_${Date.now()}.xlsx`);
-      if (success) return;
-    }
-    // Fallback: server-side export
-    try {
-      await handleSave();
-      const res = await apiFetch(`/export/excel/${result.upload_id}`);
-      if (!res.ok) throw new Error('Export failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `docxl_export_${Date.now()}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Export error:', err);
+      await editor.exportExcel(`docxl_export_${Date.now()}.xlsx`);
     }
   };
 
-  const handleExportJSON = () => {
+  const toggleFullscreen = () => {
     const editor = spreadsheetRef.current;
-    if (editor && editor.exportJSON) {
-      editor.exportJSON();
-      return;
+    if (editor && editor.toggleFullscreen) {
+      editor.toggleFullscreen();
     }
-    // Fallback
-    const json = JSON.stringify({ rows: currentRows, summary: result.summary }, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `docxl_export_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">Extraction Results</h2>
-          <p className="text-muted-foreground mt-1">
-            {result?.file_name || 'Document'} &bull; {currentRows.length} rows extracted
-            {result?.document_type && <Badge variant="secondary" className="ml-2">{result.document_type}</Badge>}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={onBack}><ChevronRight className="w-4 h-4 mr-1 rotate-180" /> Back</Button>
-          <Button variant="outline" size="sm" onClick={handleSave} disabled={saving}>
-            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : saved ? <Check className="w-4 h-4 mr-1 text-green-500" /> : <Edit3 className="w-4 h-4 mr-1" />}
-            {saved ? 'Saved!' : 'Save Changes'}
+    <div className="space-y-4 animate-fade-in min-h-screen">
+      {/* Clean Header: Only Download Excel + Fullscreen */}
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ChevronRight className="w-4 h-4 mr-1 rotate-180" /> Back
+        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={toggleFullscreen}>
+            <Maximize2 className="w-4 h-4 mr-1" /> Fullscreen
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExportJSON}><FileDown className="w-4 h-4 mr-1" /> JSON</Button>
-          <Button size="sm" onClick={handleExportExcel}><Download className="w-4 h-4 mr-1" /> Download Excel</Button>
+          <Button size="sm" onClick={handleExportExcel}>
+            <Download className="w-4 h-4 mr-1" /> Download Excel
+          </Button>
         </div>
       </div>
 
-      {/* Partial result banner */}
-      {result?.partial && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-          <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-amber-800">{result.partial_message || 'We extracted most data. You can review and edit.'}</p>
-            <p className="text-xs text-amber-600 mt-1">Low-confidence rows are highlighted with a colored border. Click any cell to edit.</p>
-          </div>
-        </div>
-      )}
-
-      <PageWarningBanner warning={result?.warning} />
-
-      {/* Summary Cards */}
-      {result?.summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Total Rows</p><p className="text-2xl font-bold">{currentRows.length}</p></CardContent></Card>
-          <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Total Amount</p><p className="text-2xl font-bold">{currentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0).toFixed(2)}</p></CardContent></Card>
-          <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Confidence</p><p className="text-2xl font-bold">{((result.confidence_score || 0.85) * 100).toFixed(0)}%</p></CardContent></Card>
-          {result?.processing_time_seconds && (
-            <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Processing</p><p className="text-2xl font-bold">{result.processing_time_seconds}s</p></CardContent></Card>
-          )}
-        </div>
-      )}
-
-      {/* Spreadsheet Toolbar */}
-      <Card>
-        <CardContent className="py-3 px-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => spreadsheetRef.current?.addRow()}
-                title="Add Row"
-              >
-                <Plus className="w-4 h-4 mr-1" /> Row
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => spreadsheetRef.current?.addColumn()}
-                title="Add Column"
-              >
-                <Plus className="w-4 h-4 mr-1" /> Column
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => spreadsheetRef.current?.deleteSelectedRows()}
-                title="Delete Selected Rows"
-              >
-                <Minus className="w-4 h-4 mr-1" /> Delete Selected
-              </Button>
-              <Separator orientation="vertical" className="h-6" />
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => spreadsheetRef.current?.toggleFullscreen()}
-                title="Toggle Fullscreen"
-              >
-                <RefreshCw className="w-4 h-4 mr-1" /> Fullscreen
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Right-click cells for more options • Ctrl+Z to undo • Ctrl+C/V to copy/paste
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Spreadsheet Editor (AG Grid) */}
-      <Card className="overflow-hidden">
+      {/* ONLY SPREADSHEET - NO CLUTTER */}
+      <Card className="overflow-hidden border-0 shadow-none">
         <CardContent className="p-0">
           <SpreadsheetEditor
             ref={spreadsheetRef}
@@ -1350,11 +1245,6 @@ const ResultView = ({ result, onBack }) => {
           />
         </CardContent>
       </Card>
-
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <p>Double-click cells to edit • Click column headers to sort • Drag column borders to resize</p>
-        <p>Keyboard: Arrow keys to navigate • Enter to edit • Tab to move • Escape to cancel</p>
-      </div>
     </div>
   );
 };

@@ -5,22 +5,19 @@ import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
 
 /**
- * SpreadsheetEditorAG — Production-grade AG Grid spreadsheet
+ * SpreadsheetEditorAG — CLEAN Excel-like Grid
  * 
- * Features:
+ * ✅ Single-click editing
  * ✅ Dynamic columns (NO hardcoding)
- * ✅ Edit any cell
- * ✅ Add/delete rows
- * ✅ Add/delete columns  
- * ✅ Rename columns
- * ✅ Resize columns
- * ✅ Copy/paste
- * ✅ Undo/redo
  * ✅ Keyboard navigation
- * ✅ Column sorting
- * ✅ Confidence-based cell coloring
- * ✅ Client-side Excel export (SheetJS)
- * ✅ Fullscreen mode
+ * ✅ Copy/paste
+ * ✅ Column resize
+ * ✅ Excel export
+ * 
+ * ❌ NO toolbars
+ * ❌ NO context menus
+ * ❌ NO add/delete buttons
+ * ❌ NO confidence colors
  */
 
 const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false }, ref) => {
@@ -84,11 +81,9 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
         headerName,
         editable: !readOnly,
         sortable: true,
-        filter: true,
         resizable: true,
-        headerComponentParams: {
-          enableRename: true,
-        },
+        flex: 1,
+        minWidth: 120,
       };
 
       // Column-specific configs
@@ -98,68 +93,31 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
           const val = parseFloat(params.value);
           return isNaN(val) ? '0.00' : val.toFixed(2);
         };
-        def.width = 120;
-      } else if (key === 'date') {
-        def.width = 120;
       } else if (key === 'description') {
-        def.width = 280;
+        def.minWidth = 280;
         def.wrapText = true;
-        def.autoHeight = false;
       } else if (key === 'type') {
         def.cellEditor = 'agSelectCellEditor';
         def.cellEditorParams = {
           values: ['debit', 'credit', 'expense', 'income', 'other'],
         };
-        def.width = 100;
       } else if (key === 'category') {
         def.cellEditor = 'agSelectCellEditor';
         def.cellEditorParams = {
           values: ['food', 'transport', 'utilities', 'salary', 'rent', 'transfer', 'shopping', 'healthcare', 'education', 'entertainment', 'other'],
         };
-        def.width = 130;
-      } else {
-        def.width = 150;
       }
-
-      // Cell styling based on confidence
-      def.cellStyle = params => {
-        const confidence = params.data?.confidence ?? 1;
-        if (confidence < 0.3) {
-          return { 
-            backgroundColor: '#fef2f2',
-            borderLeft: '3px solid #ef4444',
-          };
-        } else if (confidence < 0.6) {
-          return {
-            backgroundColor: '#fffbeb',
-            borderLeft: '3px solid #f59e0b',
-          };
-        }
-        return null;
-      };
 
       return def;
     });
 
-    // Add row number column at start
-    colDefs.unshift({
-      field: '_rowNum',
-      headerName: '#',
-      width: 60,
-      editable: false,
-      pinned: 'left',
-      valueGetter: params => params.node.rowIndex + 1,
-      cellStyle: { backgroundColor: '#f8fafc', fontWeight: 600, color: '#64748b' },
-    });
-
     setColumnDefs(colDefs);
 
-    // Transform row data
-    const transformedRows = rows.map((row, idx) => ({
-      ...row,
-      _rowNum: idx + 1,
-      _rowId: row._id || `row_${idx}_${Date.now()}`,
-    }));
+    // Transform row data (remove internal fields)
+    const transformedRows = rows.map(row => {
+      const { _rowNum, _rowId, confidence, row_number, ...cleanRow } = row;
+      return cleanRow;
+    });
 
     setRowData(transformedRows);
   }, [rows, readOnly]);
@@ -173,148 +131,12 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
     
     api.forEachNode(node => {
       if (node.data) {
-        // Remove internal fields
-        const { _rowNum, _rowId, ...cleanRow } = node.data;
-        updatedRows.push(cleanRow);
+        updatedRows.push(node.data);
       }
     });
     
     onUpdate(updatedRows);
   }, [onUpdate]);
-
-  // Add row
-  const addRow = useCallback(() => {
-    const api = gridRef.current?.api;
-    if (!api) return;
-
-    // Get all column fields (except internal ones)
-    const allCols = api.getColumns()?.map(col => col.getColId()).filter(id => !id.startsWith('_')) || [];
-    
-    const newRow = {};
-    allCols.forEach(col => {
-      if (col === 'amount' || col === 'gst') {
-        newRow[col] = 0;
-      } else if (col === 'type') {
-        newRow[col] = 'debit';
-      } else if (col === 'confidence') {
-        newRow[col] = 1.0;
-      } else {
-        newRow[col] = '';
-      }
-    });
-
-    newRow._rowId = `new_${Date.now()}`;
-    newRow.confidence = 1.0;
-
-    api.applyTransaction({ add: [newRow] });
-    
-    if (onUpdate) {
-      const updatedRows = [];
-      api.forEachNode(node => {
-        if (node.data) {
-          const { _rowNum, _rowId, ...cleanRow } = node.data;
-          updatedRows.push(cleanRow);
-        }
-      });
-      onUpdate(updatedRows);
-    }
-  }, [onUpdate]);
-
-  // Delete selected rows
-  const deleteSelectedRows = useCallback(() => {
-    const api = gridRef.current?.api;
-    if (!api) return;
-
-    const selectedRows = api.getSelectedRows();
-    if (selectedRows.length === 0) return;
-
-    api.applyTransaction({ remove: selectedRows });
-
-    if (onUpdate) {
-      const updatedRows = [];
-      api.forEachNode(node => {
-        if (node.data) {
-          const { _rowNum, _rowId, ...cleanRow } = node.data;
-          updatedRows.push(cleanRow);
-        }
-      });
-      onUpdate(updatedRows);
-    }
-  }, [onUpdate]);
-
-  // Add column
-  const addColumn = useCallback(() => {
-    const api = gridRef.current?.api;
-    if (!api) return;
-
-    const existingCols = api.getColumns()?.filter(col => !col.getColId().startsWith('_')).length || 0;
-    const newColName = `Column ${existingCols + 1}`;
-
-    const newColDef = {
-      field: newColName,
-      headerName: newColName,
-      editable: !readOnly,
-      sortable: true,
-      filter: true,
-      resizable: true,
-      width: 150,
-    };
-
-    const currentCols = columnDefs.filter(col => col.field !== '_rowNum');
-    setColumnDefs([columnDefs[0], ...currentCols, newColDef]);
-
-    // Update all rows to include new column
-    const updatedRows = rowData.map(row => ({ ...row, [newColName]: '' }));
-    setRowData(updatedRows);
-
-    if (onUpdate) {
-      const cleanRows = updatedRows.map(({ _rowNum, _rowId, ...rest }) => rest);
-      onUpdate(cleanRows);
-    }
-  }, [columnDefs, rowData, readOnly, onUpdate]);
-
-  // Delete column
-  const deleteColumn = useCallback((field) => {
-    if (!field || field === '_rowNum') return;
-
-    const newColDefs = columnDefs.filter(col => col.field !== field);
-    setColumnDefs(newColDefs);
-
-    const updatedRows = rowData.map(row => {
-      const { [field]: removed, ...rest } = row;
-      return rest;
-    });
-    setRowData(updatedRows);
-
-    if (onUpdate) {
-      const cleanRows = updatedRows.map(({ _rowNum, _rowId, ...rest }) => rest);
-      onUpdate(cleanRows);
-    }
-  }, [columnDefs, rowData, onUpdate]);
-
-  // Rename column
-  const renameColumn = useCallback((oldField, newField) => {
-    if (!oldField || !newField || oldField === '_rowNum' || oldField === newField) return;
-
-    const newColDefs = columnDefs.map(col => {
-      if (col.field === oldField) {
-        return { ...col, field: newField, headerName: newField };
-      }
-      return col;
-    });
-    setColumnDefs(newColDefs);
-
-    const updatedRows = rowData.map(row => {
-      const { [oldField]: value, ...rest } = row;
-      return { ...rest, [newField]: value };
-    });
-    setRowData(updatedRows);
-
-    if (onUpdate) {
-      const cleanRows = updatedRows.map(({ _rowNum, _rowId, ...rest }) => rest);
-      onUpdate(cleanRows);
-    }
-  }, [columnDefs, rowData, onUpdate]);
 
   // Export to Excel (client-side with SheetJS)
   const exportExcel = useCallback(async (filename) => {
@@ -323,8 +145,8 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
       const api = gridRef.current?.api;
       if (!api) return false;
 
-      // Get all columns (except internal)
-      const allCols = api.getColumns()?.filter(col => !col.getColId().startsWith('_')) || [];
+      // Get all columns
+      const allCols = api.getColumns() || [];
       const headers = allCols.map(col => col.getColDef().headerName || col.getColId());
 
       // Get all row data
@@ -363,34 +185,6 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
     }
   }, []);
 
-  // Export to JSON
-  const exportJSON = useCallback(() => {
-    const api = gridRef.current?.api;
-    if (!api) return;
-
-    const allCols = api.getColumns()?.filter(col => !col.getColId().startsWith('_')) || [];
-    const headers = allCols.map(col => col.getColDef().headerName || col.getColId());
-
-    const jsonData = [];
-    api.forEachNode(node => {
-      if (node.data) {
-        const obj = {};
-        allCols.forEach((col, i) => {
-          obj[headers[i]] = node.data[col.getColId()];
-        });
-        jsonData.push(obj);
-      }
-    });
-
-    const blob = new Blob([JSON.stringify({ rows: jsonData }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `docxl_export_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, []);
-
   // Toggle fullscreen
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen(prev => !prev);
@@ -399,105 +193,27 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
     exportExcel,
-    exportJSON,
-    addRow,
-    deleteSelectedRows,
-    addColumn,
-    deleteColumn,
-    renameColumn,
     toggleFullscreen,
-  }), [exportExcel, exportJSON, addRow, deleteSelectedRows, addColumn, deleteColumn, renameColumn, toggleFullscreen]);
+  }), [exportExcel, toggleFullscreen]);
 
   // Default column properties
   const defaultColDef = useMemo(() => ({
-    sortable: true,
-    filter: true,
-    resizable: true,
     editable: !readOnly,
+    resizable: true,
+    sortable: true,
+    flex: 1,
+    minWidth: 120,
   }), [readOnly]);
 
-  // Context menu for right-click
-  const getContextMenuItems = useCallback((params) => {
-    const result = [
-      {
-        name: 'Add Row Above',
-        action: () => {
-          const api = params.api;
-          const rowIndex = params.node.rowIndex;
-          const allCols = api.getColumns()?.map(col => col.getColId()).filter(id => !id.startsWith('_')) || [];
-          const newRow = {};
-          allCols.forEach(col => {
-            newRow[col] = col === 'amount' || col === 'gst' ? 0 : '';
-          });
-          newRow._rowId = `new_${Date.now()}`;
-          newRow.confidence = 1.0;
-          api.applyTransaction({ add: [newRow], addIndex: rowIndex });
-        },
-      },
-      {
-        name: 'Add Row Below',
-        action: () => {
-          const api = params.api;
-          const rowIndex = params.node.rowIndex + 1;
-          const allCols = api.getColumns()?.map(col => col.getColId()).filter(id => !id.startsWith('_')) || [];
-          const newRow = {};
-          allCols.forEach(col => {
-            newRow[col] = col === 'amount' || col === 'gst' ? 0 : '';
-          });
-          newRow._rowId = `new_${Date.now()}`;
-          newRow.confidence = 1.0;
-          api.applyTransaction({ add: [newRow], addIndex: rowIndex });
-        },
-      },
-      {
-        name: 'Delete Row',
-        action: () => {
-          const api = params.api;
-          api.applyTransaction({ remove: [params.node.data] });
-          if (onUpdate) {
-            const updatedRows = [];
-            api.forEachNode(node => {
-              if (node.data) {
-                const { _rowNum, _rowId, ...cleanRow } = node.data;
-                updatedRows.push(cleanRow);
-              }
-            });
-            onUpdate(updatedRows);
-          }
-        },
-      },
-      'separator',
-      {
-        name: 'Rename Column',
-        action: () => {
-          const colId = params.column.getColId();
-          if (colId === '_rowNum') return;
-          const newName = prompt('Enter new column name:', params.column.getColDef().headerName);
-          if (newName && newName.trim()) {
-            renameColumn(colId, newName.trim());
-          }
-        },
-      },
-      {
-        name: 'Delete Column',
-        action: () => {
-          const colId = params.column.getColId();
-          if (colId === '_rowNum') return;
-          if (confirm(`Delete column "${params.column.getColDef().headerName}"?`)) {
-            deleteColumn(colId);
-          }
-        },
-      },
-      'separator',
-      'copy',
-      'paste',
-      'separator',
-      'export',
-    ];
-    return result;
-  }, [deleteColumn, renameColumn, onUpdate]);
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
 
-  if (!mounted || rowData.length === 0) {
+  if (rowData.length === 0) {
     return (
       <div className="flex items-center justify-center py-16 bg-gray-50 rounded-lg">
         <div className="text-center text-muted-foreground">
@@ -509,7 +225,7 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
   }
 
   return (
-    <div className={`ag-spreadsheet-wrapper ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'relative'}`}>
+    <div className={`ag-spreadsheet-wrapper ${isFullscreen ? 'fixed inset-0 z-50 bg-white p-4' : 'relative'}`}>
       <style jsx global>{`
         .ag-spreadsheet-wrapper .ag-theme-alpine {
           --ag-header-background-color: #f8fafc;
@@ -527,13 +243,10 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
           font-size: 13px;
           line-height: 1.5;
         }
-        .ag-spreadsheet-wrapper.fixed {
-          padding: 1rem;
-        }
       `}</style>
       
       {isFullscreen && (
-        <div className="flex items-center justify-between p-4 border-b bg-white">
+        <div className="flex items-center justify-between mb-4 pb-3 border-b">
           <h3 className="text-lg font-semibold">Spreadsheet Editor</h3>
           <button
             onClick={toggleFullscreen}
@@ -544,7 +257,7 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
         </div>
       )}
       
-      <div className={`ag-theme-alpine ${isFullscreen ? 'h-[calc(100vh-5rem)]' : 'h-[600px]'} w-full`}>
+      <div className={`ag-theme-alpine ${isFullscreen ? 'h-[calc(100vh-8rem)]' : 'h-[600px]'} w-full`}>
         <AgGridReact
           ref={gridRef}
           rowData={rowData}
@@ -554,12 +267,11 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
           rowSelection="multiple"
           enableRangeSelection={true}
           enableCellTextSelection={true}
-          getContextMenuItems={getContextMenuItems}
           undoRedoCellEditing={true}
           undoRedoCellEditingLimit={20}
-          singleClickEdit={false}
+          singleClickEdit={true}
           stopEditingWhenCellsLoseFocus={true}
-          suppressContextMenu={false}
+          suppressContextMenu={true}
           animateRows={true}
           suppressMovableColumns={false}
           enableBrowserTooltips={true}

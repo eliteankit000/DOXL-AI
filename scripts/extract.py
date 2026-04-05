@@ -480,10 +480,9 @@ async def main():
         log_step('done', f'Completed in {elapsed}s')
         print(json.dumps(result, ensure_ascii=False))
         
-    except Exception as e:
-        log_step('fatal', f'Fatal error: {e}')
-        # NEVER FAIL
-        elapsed = round(time.time() - start_time, 2)
+if __name__ == '__main__':
+    asyncio.run(main())
+)
         fallback = {
             'document_type': 'other',
             'columns': ['Error'],

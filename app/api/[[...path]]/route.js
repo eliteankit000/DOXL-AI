@@ -833,11 +833,10 @@ async function handleProcess(request) {
       // NEVER FAIL: even if result has error, check for partial rows
       if (result.error && (!result.rows || result.rows.length === 0)) {
         await supabase.from('uploads').update({ status: 'partial', error_message: result.error }).eq('id', upload_id);
-        const fallbackColumns = result.columns || ['Column 1'];
-        const fallbackRows = [{}];
-        fallbackColumns.forEach(col => {
-          fallbackRows[0][col] = 'Document uploaded but extraction incomplete. Please try again or edit manually.';
-        });
+        
+        // Return EMPTY dataset (no dummy data)
+        const fallbackColumns = [];
+        const fallbackRows = [];
         
         const { data: partialRecord } = await supabase
           .from('results')
@@ -848,8 +847,8 @@ async function handleProcess(request) {
               columns: fallbackColumns,
               rows: fallbackRows 
             },
-            summary: { total_rows: 1, total_columns: fallbackColumns.length },
-            confidence_score: 0.05,
+            summary: { total_rows: 0, total_columns: 0 },
+            confidence_score: 0.0,
           })
           .select()
           .single();
@@ -861,10 +860,10 @@ async function handleProcess(request) {
             document_type: 'other',
             columns: fallbackColumns,
             rows: fallbackRows,
-            summary: { total_rows: 1, total_columns: fallbackColumns.length },
-            confidence_score: 0.05,
+            summary: { total_rows: 0, total_columns: 0 },
+            confidence_score: 0.0,
             partial: true,
-            partial_message: 'Partial result ready — you can edit the data manually.',
+            partial_message: 'Extraction could not complete. Please try again with a clearer image.',
           },
         });
       }
@@ -945,13 +944,10 @@ async function handleProcess(request) {
 
       // NEVER FAIL: Try to return partial result instead of error
       const isTimeout = execError.killed || execError.signal === 'SIGTERM';
-      const partialColumns = ['Column 1'];
-      const partialRows = [{
-        row_number: 1,
-        'Column 1': isTimeout
-          ? 'Processing timed out. Document may be too large or complex. Try a clearer image or smaller PDF.'
-          : 'Extraction encountered an issue. Please try again or edit this data manually.',
-      }];
+      
+      // Return EMPTY dataset (no dummy rows)
+      const partialColumns = [];
+      const partialRows = [];
 
       // Save partial result to DB
       try {
@@ -964,8 +960,8 @@ async function handleProcess(request) {
               columns: partialColumns,
               rows: partialRows 
             },
-            summary: { total_rows: 1, total_columns: 1 },
-            confidence_score: 0.05,
+            summary: { total_rows: 0, total_columns: 0 },
+            confidence_score: 0.0,
           })
           .select()
           .single();
@@ -991,12 +987,12 @@ async function handleProcess(request) {
             document_type: 'other',
             columns: partialColumns,
             rows: partialRows,
-            summary: { total_rows: 1, total_columns: 1 },
-            confidence_score: 0.05,
+            summary: { total_rows: 0, total_columns: 0 },
+            confidence_score: 0.0,
             partial: true,
             partial_message: isTimeout
-              ? 'Processing timed out. Your credit has been refunded. Partial result is shown — you can edit it.'
-              : 'Extraction had issues. Your credit has been refunded. You can edit the data manually.',
+              ? 'Processing timed out. Your credit has been refunded. Please try again with a clearer image.'
+              : 'Extraction could not complete. Your credit has been refunded. Please try again.',
           },
         });
       } catch (innerErr) {
@@ -1014,8 +1010,8 @@ async function handleProcess(request) {
             document_type: 'other',
             columns: partialColumns,
             rows: partialRows,
-            summary: { total_rows: 1, total_columns: 1 },
-            confidence_score: 0.05,
+            summary: { total_rows: 0, total_columns: 0 },
+            confidence_score: 0.0,
             partial: true,
             partial_message: 'Extraction failed. Your credit has been refunded.',
           },
