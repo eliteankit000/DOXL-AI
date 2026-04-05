@@ -757,7 +757,9 @@ async function handleProcess(request) {
       // ── CHANGE 2: ensure Python deps are installed ──
       await ensurePythonDeps();
 
+      console.log(`[handleProcess] Starting extraction for upload ${upload_id}`);
       console.log(`[handleProcess] python:${pythonExec} | cwd:${projectRoot} | file:${tempFilePath}`);
+      console.log(`[handleProcess] OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? 'SET ('+process.env.OPENAI_API_KEY.substring(0,15)+'...)' : 'MISSING ❌'}`);
 
       const rawResult = await execFileAsync(
         pythonExec,
@@ -774,11 +776,14 @@ async function handleProcess(request) {
       ).catch(err => {
         const out = (err.stdout || '').trim();
         const errStr = err.stderr || err.message || '';
-        console.error('[handleProcess] execFile error:', errStr.substring(0, 400));
+        console.error('[handleProcess] ❌ execFile error:', errStr.substring(0, 400));
+        console.error('[handleProcess] stdout output:', out.substring(0, 500));
         // If the script still produced valid JSON on stdout despite non-zero exit, use it
         if (out) return { stdout: out, stderr: errStr };
         throw new Error('Script failed: ' + errStr.substring(0, 300));
       });
+
+      console.log(`[handleProcess] ✅ Python script completed`);
 
       const { stdout, stderr } = rawResult;
 
@@ -902,6 +907,8 @@ async function handleProcess(request) {
         responsePayload.processing_time_seconds = result.processing_time_seconds;
       }
 
+      console.log(`[handleProcess] 📊 Extracted ${normalizedRows.length} rows, ${columns.length} columns`);
+
       const { data: resultRecord, error: resultErr } = await supabase
         .from('results')
         .insert({
@@ -918,11 +925,14 @@ async function handleProcess(request) {
         .single();
 
       if (resultErr) {
-        console.error('[handleProcess] result insert error:', resultErr);
+        console.error('[handleProcess] ❌ result insert error:', resultErr);
         throw new Error('Failed to save extraction result');
       }
 
+      console.log(`[handleProcess] ✅ Result saved to DB: ${resultRecord.id}`);
+
       await supabase.from('uploads').update({ status: 'completed' }).eq('id', upload_id);
+      console.log(`[handleProcess] ✅ Upload status updated to 'completed'`);
 
       await supabase.from('usage_logs').insert({
         user_id: user.id,
@@ -939,7 +949,8 @@ async function handleProcess(request) {
         },
       });
     } catch (execError) {
-      console.error('[handleProcess] extraction error:', execError);
+      console.error('[handleProcess] ❌ extraction error:', execError.message);
+      console.error('[handleProcess] ❌ error stack:', execError.stack?.substring(0, 500));
       captureException(execError);
 
       // NEVER FAIL: Try to return partial result instead of error
@@ -967,6 +978,7 @@ async function handleProcess(request) {
           .single();
 
         await supabase.from('uploads').update({ status: 'partial' }).eq('id', upload_id);
+        console.log(`[handleProcess] ⚠️ Marked upload as 'partial' (timeout/error)`);
 
         // Refund credit on timeout or processing failure
         const profile = await getUserProfile(user.id);
@@ -978,6 +990,7 @@ async function handleProcess(request) {
             credits_used: -1,
             upload_id,
           });
+          console.log(`[handleProcess] ✅ Credit refunded to user`);
         }
 
         return jsonResponse({
