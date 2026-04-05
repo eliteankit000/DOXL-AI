@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,17 @@ import {
   FileText, Image, ChevronRight, LayoutDashboard, Clock, Edit3,
   Plus, Minus, RefreshCw, FileDown, BarChart3, Sparkles, ChevronDown, Info, ShieldCheck
 } from 'lucide-react';
+
+// Dynamic import of SpreadsheetEditor to avoid SSR issues with Handsontable
+const SpreadsheetEditor = dynamic(() => import('@/components/SpreadsheetEditor'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="w-6 h-6 animate-spin text-primary mr-2" />
+      <span className="text-muted-foreground">Loading spreadsheet...</span>
+    </div>
+  ),
+});
 
 // Lazy initialize Supabase browser client (only at runtime, not during build)
 let supabaseInstance = null;
@@ -1182,11 +1194,12 @@ const DataTable = ({ data, onUpdate }) => {
   );
 };
 
-// ============= RESULT VIEW =============
+// ============= RESULT VIEW (Handsontable Spreadsheet) =============
 const ResultView = ({ result, onBack }) => {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [currentRows, setCurrentRows] = useState(result?.rows || []);
+  const spreadsheetRef = useRef(null);
 
   const handleUpdate = (newRows) => { setCurrentRows(newRows); setSaved(false); };
 
@@ -1200,8 +1213,14 @@ const ResultView = ({ result, onBack }) => {
   };
 
   const handleExportExcel = async () => {
+    // Client-side Excel export via SpreadsheetEditor (SheetJS)
+    const editor = spreadsheetRef.current;
+    if (editor && editor.exportExcel) {
+      const success = await editor.exportExcel(`docxl_export_${Date.now()}.xlsx`);
+      if (success) return;
+    }
+    // Fallback: server-side export
     try {
-      // Save current edits first
       await handleSave();
       const res = await apiFetch(`/export/excel/${result.upload_id}`);
       if (!res.ok) throw new Error('Export failed');
@@ -1218,6 +1237,12 @@ const ResultView = ({ result, onBack }) => {
   };
 
   const handleExportJSON = () => {
+    const editor = spreadsheetRef.current;
+    if (editor && editor.exportJSON) {
+      editor.exportJSON();
+      return;
+    }
+    // Fallback
     const json = JSON.stringify({ rows: currentRows, summary: result.summary }, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `docxl_export_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
@@ -1249,25 +1274,41 @@ const ResultView = ({ result, onBack }) => {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
           <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-amber-800">{result.partial_message || 'Partial result ready — some data may need manual editing.'}</p>
-            <p className="text-xs text-amber-600 mt-1">Click any cell to edit. Low-confidence rows are highlighted in red/yellow.</p>
+            <p className="text-sm font-medium text-amber-800">{result.partial_message || 'We extracted most data. You can review and edit.'}</p>
+            <p className="text-xs text-amber-600 mt-1">Low-confidence rows are highlighted with a colored border. Click any cell to edit.</p>
           </div>
         </div>
       )}
 
       <PageWarningBanner warning={result?.warning} />
+
+      {/* Summary Cards */}
       {result?.summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Total Rows</p><p className="text-2xl font-bold">{currentRows.length}</p></CardContent></Card>
           <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Total Amount</p><p className="text-2xl font-bold">{currentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0).toFixed(2)}</p></CardContent></Card>
           <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Confidence</p><p className="text-2xl font-bold">{((result.confidence_score || 0.85) * 100).toFixed(0)}%</p></CardContent></Card>
           {result?.processing_time_seconds && (
-            <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Processing Time</p><p className="text-2xl font-bold">{result.processing_time_seconds}s</p></CardContent></Card>
+            <Card><CardContent className="pt-4 pb-4"><p className="text-sm text-muted-foreground">Processing</p><p className="text-2xl font-bold">{result.processing_time_seconds}s</p></CardContent></Card>
           )}
         </div>
       )}
-      <Card><CardContent className="pt-6"><DataTable data={{ rows: currentRows }} onUpdate={handleUpdate} /></CardContent></Card>
-      <p className="text-xs text-muted-foreground text-center">Click any cell to edit. Changes are saved when you click &quot;Save Changes&quot;.</p>
+
+      {/* Spreadsheet Editor (Handsontable) */}
+      <Card className="overflow-hidden">
+        <CardContent className="p-0">
+          <SpreadsheetEditor
+            ref={spreadsheetRef}
+            rows={currentRows}
+            onUpdate={handleUpdate}
+          />
+        </CardContent>
+      </Card>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <p>Right-click for options (add/delete rows & columns). Ctrl+Z to undo. Ctrl+C/V to copy/paste.</p>
+        <p>Keyboard: Arrow keys to navigate, Enter to edit, Tab to move.</p>
+      </div>
     </div>
   );
 };

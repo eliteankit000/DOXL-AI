@@ -10,6 +10,7 @@
         "start": "next start"
     },
     "dependencies": {
+        "@handsontable/react-wrapper": "^17.0.1",
         "@hookform/resolvers": "^5.1.1",
         "@radix-ui/react-accordion": "^1.2.11",
         "@radix-ui/react-alert-dialog": "^1.1.14",
@@ -50,6 +51,7 @@
         "date-fns": "^4.1.0",
         "embla-carousel-react": "^8.6.0",
         "exceljs": "^4.4.0",
+        "handsontable": "^17.0.1",
         "input-otp": "^1.4.2",
         "jsonwebtoken": "^9.0.2",
         "lucide-react": "^0.516.0",
@@ -70,6 +72,7 @@
         "tailwindcss-animate": "^1.0.7",
         "uuid": "^9.0.1",
         "vaul": "^1.1.2",
+        "xlsx": "^0.18.5",
         "zod": "^3.25.67"
     },
     "devDependencies": {

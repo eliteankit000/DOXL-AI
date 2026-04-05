@@ -295,11 +295,86 @@ Return: {"rows":[...], "raw_text": "first 500 chars of visible text"}
 If you cannot find structured data, still return raw_text with everything you can read.""",
 ]
 
+# ═══════════════════════════════════════════════════════
+# STEP 2B-PRE: IMAGE PREPROCESSING (enhance before AI)
+# ═══════════════════════════════════════════════════════
+
+def preprocess_image(image_path):
+    """Enhance image for better AI extraction — contrast, sharpen, normalize."""
+    try:
+        from PIL import Image as PILImage, ImageEnhance, ImageFilter
+        img = PILImage.open(image_path)
+
+        # Convert to RGB if needed
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+
+        # Resize if too small (upscale to min 1500px width for better OCR)
+        w, h = img.size
+        if w < 1500:
+            scale = 1500 / w
+            img = img.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
+
+        # Enhance contrast (helps with faded scans)
+        img = ImageEnhance.Contrast(img).enhance(1.4)
+
+        # Sharpen (helps with blurry text)
+        img = ImageEnhance.Sharpness(img).enhance(1.8)
+
+        # Slight brightness boost for dark scans
+        img = ImageEnhance.Brightness(img).enhance(1.1)
+
+        enhanced_path = image_path + '_enhanced.png'
+        img.save(enhanced_path, 'PNG', quality=95)
+        log_step('preprocess', f'Image enhanced: {w}x{h} → {img.size[0]}x{img.size[1]}')
+        return enhanced_path
+    except Exception as e:
+        log_step('preprocess', f'Image preprocessing failed (non-fatal): {e}')
+        return image_path  # Fall back to original
+
+# ═══════════════════════════════════════════════════════
+# STEP 2B-POST: OCR CORRECTIONS
+# ═══════════════════════════════════════════════════════
+
+def apply_ocr_corrections(rows):
+    """Fix common OCR misreads in numeric fields."""
+    corrections = {
+        'O': '0', 'o': '0', 'Q': '0',
+        'l': '1', 'I': '1', '|': '1',
+        'S': '5', 's': '5',
+        'B': '8',
+        'Z': '2', 'z': '2',
+        'G': '6',
+    }
+
+    for row in rows:
+        for key in ('amount', 'gst'):
+            val = row.get(key, '')
+            if isinstance(val, str) and val:
+                # Only apply corrections to values that look like they should be numbers
+                corrected = ''
+                for ch in val:
+                    if ch in corrections and not ch.isdigit():
+                        corrected += corrections[ch]
+                    else:
+                        corrected += ch
+                row[key] = corrected
+        # Fix date OCR errors
+        date_val = str(row.get('date', ''))
+        if date_val:
+            # Common: O instead of 0 in dates
+            row['date'] = date_val.replace('O', '0').replace('l', '1').replace('I', '1')
+
+    return rows
+
 
 async def ai_extract_image(image_path, doc_type, user_requirements=''):
-    """AI Vision extraction from image file."""
+    """AI Vision extraction from image file — with preprocessing."""
     try:
-        with open(image_path, 'rb') as f:
+        # Preprocess image for better accuracy
+        enhanced_path = preprocess_image(image_path)
+
+        with open(enhanced_path, 'rb') as f:
             img_b64 = base64.b64encode(f.read()).decode('utf-8')
 
         system = AI_PROMPTS.get(doc_type, AI_PROMPTS['other'])
@@ -582,6 +657,19 @@ def validate_rows(rows):
     return validated
 
 # ═══════════════════════════════════════════════════════
+# STEP 4B: OCR POST-CORRECTION PASS
+# ═══════════════════════════════════════════════════════
+
+def apply_validation_corrections(rows):
+    """Apply OCR corrections + normalize amounts after validation."""
+    rows = apply_ocr_corrections(rows)
+    # Re-validate amounts after OCR correction
+    for row in rows:
+        row['amount'] = validate_and_clean_number(row.get('amount', 0))
+        row['gst'] = validate_and_clean_number(row.get('gst', 0))
+    return rows
+
+# ═══════════════════════════════════════════════════════
 # STEP 5: NORMALIZATION
 # ═══════════════════════════════════════════════════════
 
@@ -785,8 +873,9 @@ async def run_extraction_pipeline(file_path, user_requirements, is_image, text_c
             rows = ai_result['rows']
             ai_doc_type = ai_result.get('document_type', doc_type)
 
-    # VALIDATE
+    # VALIDATE + OCR CORRECTION
     validated_rows = validate_rows(rows)
+    validated_rows = apply_validation_corrections(validated_rows)
     avg_conf = (sum(r['confidence'] for r in validated_rows) / len(validated_rows)) if validated_rows else 0
 
     # MULTI-RETRY: up to 3 attempts if results are poor
