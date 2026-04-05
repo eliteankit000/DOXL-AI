@@ -212,8 +212,13 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
 
   // Toggle fullscreen
   const toggleFullscreen = useCallback(() => {
-    setIsFullscreen(prev => !prev);
-  }, []);
+    console.log('[SpreadsheetEditorAG] toggleFullscreen called');
+    console.log('[SpreadsheetEditorAG] Current fullscreen state:', isFullscreen);
+    setIsFullscreen(prev => {
+      console.log('[SpreadsheetEditorAG] New fullscreen state:', !prev);
+      return !prev;
+    });
+  }, [isFullscreen]);
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({

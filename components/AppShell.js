@@ -1235,9 +1235,29 @@ const ResultView = ({ result, onBack }) => {
   };
 
   const toggleFullscreen = () => {
+    console.log('[ResultView] Fullscreen clicked');
     const editor = spreadsheetRef.current;
-    if (editor && editor.toggleFullscreen) {
+    console.log('[ResultView] Editor ref for fullscreen:', editor);
+    
+    if (!editor) {
+      console.error('[ResultView] No editor ref found for fullscreen');
+      alert('Spreadsheet not ready. Please wait a moment and try again.');
+      return;
+    }
+    
+    if (!editor.toggleFullscreen) {
+      console.error('[ResultView] toggleFullscreen method not found on editor');
+      alert('Fullscreen function not available. Please refresh the page.');
+      return;
+    }
+    
+    console.log('[ResultView] Calling toggleFullscreen...');
+    try {
       editor.toggleFullscreen();
+      console.log('[ResultView] Fullscreen toggled successfully');
+    } catch (err) {
+      console.error('[ResultView] Fullscreen error:', err);
+      alert('Fullscreen toggle failed: ' + err.message);
     }
   };
 
