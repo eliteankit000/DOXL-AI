@@ -37,94 +37,150 @@ def log_step(step, msg, extra=None):
 # ═══════════════════════════════════════════════════════
 
 # Universal prompt for ANY document type with dynamic columns
-UNIVERSAL_PROMPT = """You are an expert data extraction AI.
+UNIVERSAL_PROMPT = """You are an expert data extraction AI specializing in creating CLEAN, STRUCTURED, EXCEL-LIKE spreadsheets.
 
-TASK: Extract ALL data from this document into a structured table format.
+TASK: Extract ALL data from this document into a HORIZONTAL TABLE FORMAT.
 
 CRITICAL RULES:
-1. **AUTO-DETECT COLUMNS**: Look at the document and identify what columns exist
-2. **NO PREDEFINED SCHEMA**: Do NOT assume columns like "date, description, amount"
-3. **USE ACTUAL HEADERS**: If the document has column headers in the first row, use those EXACT names
-4. **GENERIC NAMES**: If no clear headers, use: "Column 1", "Column 2", "Column 3", etc.
-5. **EXTRACT EVERYTHING**: Every visible data row must be included
-6. **PRESERVE STRUCTURE**: Keep column order as it appears in the document
+1. **HORIZONTAL TABLES ONLY**: Convert ALL data into rows and columns (NOT vertical key-value lists)
+2. **AUTO-DETECT STRUCTURE**: 
+   - If document has a TABLE → preserve exact structure
+   - If document has KEY-VALUE pairs → convert into SINGLE ROW with multiple columns
+   - If document has REPEATED sections → create MULTIPLE ROWS
+3. **CLEAN COLUMN NAMES**:
+   - Remove special characters
+   - Use Title Case
+   - Keep names short and clear
+   - Example: "Student's Name" → "Student Name"
+   - Example: "Mobile No" → "Mobile"
+4. **VALUE NORMALIZATION**:
+   - Dates → DD/MM/YYYY format
+   - Numbers → remove symbols, keep numeric
+   - Text → trimmed, no extra spaces
+5. **EXCEL-QUALITY OUTPUT**:
+   - First row = headers
+   - Next rows = data
+   - No empty rows
+   - No nested objects
+   - Flat table structure
 
 RETURN FORMAT:
 {
-  "document_type": "bank_statement|invoice|receipt|table|spreadsheet|other",
-  "columns": ["Column Name 1", "Column Name 2", "Column Name 3", ...],
+  "document_type": "form|bank_statement|invoice|receipt|table|spreadsheet|other",
+  "columns": ["Column Name 1", "Column Name 2", ...],
   "rows": [
-    {"Column Name 1": "value", "Column Name 2": "value", ...},
-    {"Column Name 1": "value", "Column Name 2": "value", ...}
+    {"Column Name 1": "value1", "Column Name 2": "value2", ...}
   ]
 }
 
 EXAMPLES:
 
-Example 1 - Bank Statement with headers:
-Document has headers: "Date | Description | Debit | Credit | Balance"
+Example 1 - FORM with key-value pairs (CONVERT TO HORIZONTAL):
+Document shows:
+  Date: 03/04/2026
+  Time: 13:38
+  University: SAGE UNIVERSITY INDORE
+  Form Type: Semester Registration Form
+
+❌ WRONG (vertical):
+{
+  "columns": ["Field", "Value"],
+  "rows": [
+    {"Field": "Date", "Value": "03/04/2026"},
+    {"Field": "Time", "Value": "13:38"}
+  ]
+}
+
+✅ CORRECT (horizontal):
+{
+  "document_type": "form",
+  "columns": ["Date", "Time", "University", "Form Type"],
+  "rows": [
+    {
+      "Date": "03/04/2026",
+      "Time": "13:38",
+      "University": "SAGE UNIVERSITY INDORE",
+      "Form Type": "Semester Registration Form"
+    }
+  ]
+}
+
+Example 2 - TABLE with headers (preserve structure):
+Document has table: "Date | Description | Debit | Credit | Balance"
 Return:
 {
   "document_type": "bank_statement",
   "columns": ["Date", "Description", "Debit", "Credit", "Balance"],
   "rows": [
-    {"Date": "2024-01-15", "Description": "ATM Withdrawal", "Debit": "500", "Credit": "", "Balance": "12500"},
-    ...
+    {"Date": "15/01/2024", "Description": "ATM Withdrawal", "Debit": "500", "Credit": "", "Balance": "12500"},
+    {"Date": "16/01/2024", "Description": "Salary Credit", "Debit": "", "Credit": "50000", "Balance": "62500"}
   ]
 }
 
-Example 2 - Invoice WITHOUT clear headers:
-Document is a messy invoice with: Item descriptions in column 1, quantities in column 2, prices in column 3
+Example 3 - INVOICE (convert to horizontal):
+Document shows invoice fields:
+  Invoice #: INV-001
+  Date: 15/03/2024
+  Customer: John Doe
+  Total: 5000
+
 Return:
 {
   "document_type": "invoice",
-  "columns": ["Column 1", "Column 2", "Column 3"],
+  "columns": ["Invoice Number", "Date", "Customer", "Total"],
   "rows": [
-    {"Column 1": "Widget A", "Column 2": "10", "Column 3": "199.99"},
-    ...
+    {"Invoice Number": "INV-001", "Date": "15/03/2024", "Customer": "John Doe", "Total": "5000"}
   ]
 }
 
-Example 3 - Table with headers:
-Document has: "Product Name | SKU | Stock | Price"
+Example 4 - MULTIPLE ITEMS (create multiple rows):
+Document shows:
+  Item 1: Widget A - Qty: 10 - Price: 100
+  Item 2: Widget B - Qty: 5 - Price: 200
+
 Return:
 {
-  "document_type": "table",
-  "columns": ["Product Name", "SKU", "Stock", "Price"],
+  "document_type": "invoice",
+  "columns": ["Item", "Quantity", "Price"],
   "rows": [
-    {"Product Name": "Item 1", "SKU": "ABC123", "Stock": "50", "Price": "29.99"},
-    ...
+    {"Item": "Widget A", "Quantity": "10", "Price": "100"},
+    {"Item": "Widget B", "Quantity": "5", "Price": "200"}
   ]
 }
+
+IMPORTANT:
+- ALWAYS convert key-value pairs into horizontal rows
+- NEVER return vertical Field → Value format
+- ALWAYS use clean, professional column names
+- Output must be ready for Excel export
 
 RETURN ONLY THE JSON. NO TEXT BEFORE OR AFTER. NO MARKDOWN CODE BLOCKS."""
 
 RETRY_PROMPTS = [
-    # Retry 1: Ultra-simple
-    """Extract ALL data from this image into a table.
+    # Retry 1: Simplified horizontal format
+    """Extract ALL data from this document into a HORIZONTAL TABLE (NOT vertical list).
 
-If the document has column headers, use those names.
-If not, use: "Column 1", "Column 2", etc.
+RULES:
+- If document has KEY-VALUE pairs → convert to SINGLE ROW
+- If document has TABLE → preserve structure
+- Clean column names (Title Case, no special chars)
+- Return format: {"columns": [...], "rows": [{...}]}
 
-Return JSON:
-{
-  "columns": ["col1", "col2", ...],
-  "rows": [{"col1": "val", "col2": "val"}, ...]
-}
+Example:
+Document: "Name: John, Age: 25, City: NYC"
+Return: {"columns": ["Name", "Age", "City"], "rows": [{"Name": "John", "Age": "25", "City": "NYC"}]}
 
 ONLY JSON. NO TEXT.""",
 
-    # Retry 2: Minimal
-    """Look at this document. Extract every row of data.
-Return:
-{"columns": [...], "rows": [{...}]}
+    # Retry 2: Ultra-minimal
+    """Convert this document data into a spreadsheet table.
+Return: {"columns": [...], "rows": [{...}]}
 
-Use column names from the document or "Column 1", "Column 2" if unclear.""",
+Make it horizontal (columns across top, values in rows below).""",
 
-    # Retry 3: Raw fallback
-    """Read everything visible in this document.
-Return every line of text as structured rows.
-{"columns": ["Text"], "rows": [{"Text": "line 1"}, {"Text": "line 2"}]}""",
+    # Retry 3: Fallback
+    """Extract text and structure as table.
+{"columns": ["Column 1", "Column 2"], "rows": [{"Column 1": "...", "Column 2": "..."}]}""",
 ]
 
 # ═══════════════════════════════════════════════════════
@@ -265,13 +321,122 @@ def safe_parse_json(response):
     return None
 
 # ═══════════════════════════════════════════════════════
-# STEP 5: VALIDATION & NORMALIZATION
+# STEP 5: VERTICAL TO HORIZONTAL CONVERSION
+# ═══════════════════════════════════════════════════════
+
+def convert_vertical_to_horizontal(result):
+    """
+    Detect vertical key-value format and convert to horizontal table.
+    
+    Vertical format (WRONG):
+    columns: ["Field", "Value"]
+    rows: [
+        {"Field": "Name", "Value": "John"},
+        {"Field": "Age", "Value": "25"}
+    ]
+    
+    Horizontal format (CORRECT):
+    columns: ["Name", "Age"]
+    rows: [{"Name": "John", "Age": "25"}]
+    """
+    if not result or not isinstance(result, dict):
+        return result
+    
+    columns = result.get('columns', [])
+    rows = result.get('rows', [])
+    
+    if not columns or not rows:
+        return result
+    
+    # Detect vertical format: typically has 2 columns like ["Field", "Value"] or ["Key", "Value"]
+    if len(columns) == 2:
+        col1, col2 = columns[0].lower(), columns[1].lower()
+        
+        # Common vertical format indicators
+        vertical_indicators = [
+            ('field', 'value'),
+            ('key', 'value'),
+            ('name', 'value'),
+            ('attribute', 'value'),
+            ('property', 'value'),
+            ('parameter', 'value'),
+        ]
+        
+        is_vertical = any(
+            (col1 == ind[0] or col1.startswith(ind[0])) and 
+            (col2 == ind[1] or col2.startswith(ind[1]))
+            for ind in vertical_indicators
+        )
+        
+        if is_vertical:
+            log_step('convert', f'Detected vertical format, converting to horizontal')
+            
+            # Extract new columns from first column values
+            new_columns = []
+            new_row = {}
+            
+            for row in rows:
+                field_key = row.get(columns[0], '')
+                field_value = row.get(columns[1], '')
+                
+                if field_key and isinstance(field_key, str):
+                    # Clean column name
+                    clean_key = clean_column_name(field_key)
+                    new_columns.append(clean_key)
+                    new_row[clean_key] = str(field_value).strip() if field_value else ''
+            
+            if new_columns:
+                result['columns'] = new_columns
+                result['rows'] = [new_row]
+                log_step('convert', f'Converted to {len(new_columns)} columns, 1 row')
+    
+    return result
+
+def clean_column_name(name):
+    """Clean and normalize column names for Excel-quality output."""
+    if not name or not isinstance(name, str):
+        return 'Column'
+    
+    # Remove special characters except spaces and hyphens
+    name = re.sub(r'[^\w\s-]', '', name)
+    
+    # Replace multiple spaces/hyphens with single space
+    name = re.sub(r'[\s-]+', ' ', name)
+    
+    # Trim and title case
+    name = name.strip().title()
+    
+    # Common replacements for cleaner names
+    replacements = {
+        'S Name': 'Name',
+        'No ': 'Number ',
+        'Id ': 'ID ',
+        'Qty': 'Quantity',
+        'Amt': 'Amount',
+        'Desc': 'Description',
+        'Tel': 'Telephone',
+        'Mob': 'Mobile',
+    }
+    
+    for old, new in replacements.items():
+        name = name.replace(old, new)
+    
+    # Remove trailing spaces
+    name = name.strip()
+    
+    return name if name else 'Column'
+
+# ═══════════════════════════════════════════════════════
+# STEP 6: VALIDATION & NORMALIZATION
 # ═══════════════════════════════════════════════════════
 
 def validate_and_normalize(result):
     """Validate dynamic column result and clean data."""
     if not result or not isinstance(result, dict):
         return None
+
+    # STEP 1: Convert vertical to horizontal if needed
+    result = convert_vertical_to_horizontal(result)
 
     columns = result.get('columns', [])
     rows = result.get('rows', [])
@@ -280,20 +445,33 @@ def validate_and_normalize(result):
         log_step('validate', 'Missing columns or rows')
         return None
 
-    # Ensure all columns are strings
-    columns = [str(col).strip() for col in columns if col]
+    # STEP 2: Clean column names (Title Case, no special chars)
+    cleaned_columns = [clean_column_name(col) for col in columns if col]
+    
+    if not cleaned_columns:
+        log_step('validate', 'No valid columns after cleaning')
+        return None
 
-    # Validate and clean rows
+    # STEP 3: Create column mapping (old name → clean name)
+    column_mapping = {}
+    for i, old_col in enumerate(columns):
+        if i < len(cleaned_columns):
+            column_mapping[old_col] = cleaned_columns[i]
+
+    # STEP 4: Validate and clean rows with new column names
     validated_rows = []
     for row in rows:
         if not isinstance(row, dict):
             continue
 
-        # Ensure row has all columns (fill missing with '')
+        # Map old column names to new clean names
         clean_row = {}
-        for col in columns:
-            value = row.get(col, '')
-            clean_row[col] = str(value).strip() if value is not None else ''
+        for old_col, new_col in column_mapping.items():
+            value = row.get(old_col, '')
+            # Normalize value: trim whitespace, remove extra spaces
+            clean_value = str(value).strip() if value is not None else ''
+            clean_value = re.sub(r'\s+', ' ', clean_value)  # Replace multiple spaces with single
+            clean_row[new_col] = clean_value
 
         # Skip empty rows
         if all(not v for v in clean_row.values()):
@@ -305,9 +483,9 @@ def validate_and_normalize(result):
         log_step('validate', 'No valid rows after validation')
         return None
 
-    result['columns'] = columns
+    result['columns'] = cleaned_columns
     result['rows'] = validated_rows
-    log_step('validate', f'Validated: {len(columns)} columns, {len(validated_rows)} rows')
+    log_step('validate', f'Validated: {len(cleaned_columns)} columns, {len(validated_rows)} rows')
     return result
 
 # ═══════════════════════════════════════════════════════
