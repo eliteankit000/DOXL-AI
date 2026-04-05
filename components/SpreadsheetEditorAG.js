@@ -140,14 +140,25 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
 
   // Export to Excel (client-side with SheetJS)
   const exportExcel = useCallback(async (filename) => {
+    console.log('[SpreadsheetEditorAG] exportExcel called with filename:', filename);
     try {
+      console.log('[SpreadsheetEditorAG] Importing xlsx...');
       const XLSX = (await import('xlsx')).default || (await import('xlsx'));
+      console.log('[SpreadsheetEditorAG] xlsx imported:', !!XLSX);
+      
       const api = gridRef.current?.api;
-      if (!api) return false;
+      console.log('[SpreadsheetEditorAG] Grid API:', !!api);
+      
+      if (!api) {
+        console.error('[SpreadsheetEditorAG] No grid API found');
+        return false;
+      }
 
       // Get all columns
       const allCols = api.getColumns() || [];
+      console.log('[SpreadsheetEditorAG] Columns count:', allCols.length);
       const headers = allCols.map(col => col.getColDef().headerName || col.getColId());
+      console.log('[SpreadsheetEditorAG] Headers:', headers);
 
       // Get all row data
       const data = [];
@@ -160,8 +171,16 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
           data.push(row);
         }
       });
+      console.log('[SpreadsheetEditorAG] Rows count:', data.length);
+
+      if (data.length === 0) {
+        console.warn('[SpreadsheetEditorAG] No data to export');
+        alert('No data to export. The spreadsheet is empty.');
+        return false;
+      }
 
       // Create worksheet
+      console.log('[SpreadsheetEditorAG] Creating worksheet...');
       const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
 
       // Auto-size columns
@@ -175,12 +194,18 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
       });
       ws['!cols'] = colWidths;
 
+      console.log('[SpreadsheetEditorAG] Creating workbook...');
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Extracted Data');
+      
+      console.log('[SpreadsheetEditorAG] Writing file:', filename);
       XLSX.writeFile(wb, filename || `docxl_export_${Date.now()}.xlsx`);
+      
+      console.log('[SpreadsheetEditorAG] ✅ Export successful');
       return true;
     } catch (err) {
-      console.error('Excel export error:', err);
+      console.error('[SpreadsheetEditorAG] ❌ Excel export error:', err);
+      alert('Export failed: ' + err.message);
       return false;
     }
   }, []);

@@ -1205,9 +1205,32 @@ const ResultView = ({ result, onBack }) => {
 
   const handleExportExcel = async () => {
     // Client-side Excel export via SpreadsheetEditor (SheetJS)
+    console.log('[ResultView] Export Excel clicked');
     const editor = spreadsheetRef.current;
-    if (editor && editor.exportExcel) {
-      await editor.exportExcel(`docxl_export_${Date.now()}.xlsx`);
+    console.log('[ResultView] Editor ref:', editor);
+    
+    if (!editor) {
+      console.error('[ResultView] No editor ref found');
+      alert('Spreadsheet not ready. Please wait a moment and try again.');
+      return;
+    }
+    
+    if (!editor.exportExcel) {
+      console.error('[ResultView] exportExcel method not found on editor');
+      alert('Export function not available. Please refresh the page.');
+      return;
+    }
+    
+    console.log('[ResultView] Calling exportExcel...');
+    try {
+      const success = await editor.exportExcel(`docxl_export_${Date.now()}.xlsx`);
+      console.log('[ResultView] Export result:', success);
+      if (!success) {
+        alert('Export failed. Please check console for errors.');
+      }
+    } catch (err) {
+      console.error('[ResultView] Export error:', err);
+      alert('Export failed: ' + err.message);
     }
   };
 
