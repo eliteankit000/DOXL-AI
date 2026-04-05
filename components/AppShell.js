@@ -2,7 +2,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
-import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,17 +18,8 @@ import {
   Plus, Minus, RefreshCw, FileDown, BarChart3, Sparkles, ChevronDown, Info, ShieldCheck, Maximize2
 } from 'lucide-react';
 
-// Dynamic import of SpreadsheetEditor to avoid SSR issues with AG Grid
-// IMPORTANT: forwardRef is required for refs to work with dynamic imports
-const SpreadsheetEditor = dynamic(() => import('@/components/SpreadsheetEditorAG'), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center py-12">
-      <Loader2 className="w-6 h-6 animate-spin text-primary mr-2" />
-      <span className="text-muted-foreground">Loading spreadsheet...</span>
-    </div>
-  ),
-});
+// Direct import - AG Grid Community works with SSR
+import SpreadsheetEditor from '@/components/SpreadsheetEditorAG';
 
 // Lazy initialize Supabase browser client (only at runtime, not during build)
 let supabaseInstance = null;
@@ -1198,22 +1188,7 @@ const DataTable = ({ data, onUpdate }) => {
 // ============= RESULT VIEW (CLEAN SPREADSHEET ONLY) =============
 const ResultView = ({ result, onBack }) => {
   const [currentRows, setCurrentRows] = useState(result?.rows || []);
-  const [spreadsheetReady, setSpreadsheetReady] = useState(false);
   const spreadsheetRef = useRef(null);
-
-  // Check if spreadsheet is ready after a short delay
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (spreadsheetRef.current) {
-        setSpreadsheetReady(true);
-        console.log('[ResultView] ✅ Spreadsheet ref is ready:', spreadsheetRef.current);
-      } else {
-        console.warn('[ResultView] ⚠️ Spreadsheet ref is still null');
-      }
-    }, 1000); // Wait 1 second for component to mount
-
-    return () => clearTimeout(timer);
-  }, [currentRows]);
 
   const handleUpdate = (newRows) => {
     setCurrentRows(newRows);
@@ -1301,10 +1276,6 @@ const ResultView = ({ result, onBack }) => {
             ref={spreadsheetRef}
             rows={currentRows}
             onUpdate={handleUpdate}
-            onReady={() => {
-              console.log('[ResultView] onReady callback fired');
-              setSpreadsheetReady(true);
-            }}
           />
         </CardContent>
       </Card>

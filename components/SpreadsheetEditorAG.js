@@ -20,7 +20,7 @@ import 'ag-grid-community/styles/ag-theme-alpine.css';
  * ❌ NO confidence colors
  */
 
-const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false, onReady }, ref) => {
+const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false }, ref) => {
   const gridRef = useRef(null);
   const [mounted, setMounted] = useState(false);
   const [columnDefs, setColumnDefs] = useState([]);
@@ -31,14 +31,6 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false,
     setMounted(true);
     return () => setMounted(false);
   }, []);
-
-  // Notify parent when component is ready
-  useEffect(() => {
-    if (mounted && rowData.length > 0 && onReady) {
-      console.log('[SpreadsheetEditorAG] Component ready, calling onReady callback');
-      onReady();
-    }
-  }, [mounted, rowData.length, onReady]);
 
   // Build dynamic column definitions from row data
   useEffect(() => {
