@@ -832,27 +832,23 @@ async function handleProcess(request) {
 
       // NEVER FAIL: even if result has error, check for partial rows
       if (result.error && (!result.rows || result.rows.length === 0)) {
-        // Only fail if truly no data at all - which shouldn't happen with v3 extract.py
         await supabase.from('uploads').update({ status: 'partial', error_message: result.error }).eq('id', upload_id);
-        // Still try to return something useful
-        const fallbackRows = [{
-          row_number: 1,
-          date: '',
-          description: 'Document uploaded but extraction incomplete. Please try again or edit manually.',
-          amount: 0,
-          type: 'other',
-          category: 'other',
-          gst: 0,
-          reference: '',
-          confidence: 0.05,
-        }];
+        const fallbackColumns = result.columns || ['Column 1'];
+        const fallbackRows = [{}];
+        fallbackColumns.forEach(col => {
+          fallbackRows[0][col] = 'Document uploaded but extraction incomplete. Please try again or edit manually.';
+        });
+        
         const { data: partialRecord } = await supabase
           .from('results')
           .insert({
             upload_id,
             document_type: 'other',
-            structured_json: { rows: fallbackRows },
-            summary: { total_rows: 1, total_amount: 0 },
+            structured_json: { 
+              columns: fallbackColumns,
+              rows: fallbackRows 
+            },
+            summary: { total_rows: 1, total_columns: fallbackColumns.length },
             confidence_score: 0.05,
           })
           .select()
@@ -863,8 +859,9 @@ async function handleProcess(request) {
             id: partialRecord?.id || upload_id,
             upload_id,
             document_type: 'other',
+            columns: fallbackColumns,
             rows: fallbackRows,
-            summary: { total_rows: 1, total_amount: 0 },
+            summary: { total_rows: 1, total_columns: fallbackColumns.length },
             confidence_score: 0.05,
             partial: true,
             partial_message: 'Partial result ready — you can edit the data manually.',
@@ -872,26 +869,24 @@ async function handleProcess(request) {
         });
       }
 
-      // Normalize rows
-      const normalizedRows = (result.rows || []).map((row, index) => ({
+      // Extract columns from result (v4 format)
+      const columns = result.columns || [];
+      const rows = result.rows || [];
+
+      // No normalization - keep dynamic structure as-is
+      const normalizedRows = rows.map((row, index) => ({
         row_number: index + 1,
-        date: row.date || '',
-        description: row.description || '',
-        amount: parseFloat(row.amount) || 0,
-        type: row.type || 'debit',
-        category: row.category || '',
-        gst: parseFloat(row.gst) || 0,
-        reference: row.reference || '',
-        confidence: row.confidence !== undefined ? parseFloat(row.confidence) : 0.85,
+        ...row,
       }));
 
       const summary = result.summary || {
         total_rows: normalizedRows.length,
-        total_amount: normalizedRows.reduce((sum, r) => sum + r.amount, 0),
+        total_columns: columns.length,
       };
 
       const responsePayload = {
         document_type: result.document_type || 'other',
+        columns,
         rows: normalizedRows,
         summary,
         confidence_score: result.confidence || result.confidence_score || 0.85,
@@ -913,7 +908,10 @@ async function handleProcess(request) {
         .insert({
           upload_id,
           document_type: result.document_type || 'other',
-          structured_json: { rows: normalizedRows },
+          structured_json: { 
+            columns,
+            rows: normalizedRows 
+          },
           summary,
           confidence_score: result.confidence || 0.85,
         })
@@ -947,18 +945,12 @@ async function handleProcess(request) {
 
       // NEVER FAIL: Try to return partial result instead of error
       const isTimeout = execError.killed || execError.signal === 'SIGTERM';
+      const partialColumns = ['Column 1'];
       const partialRows = [{
         row_number: 1,
-        date: '',
-        description: isTimeout
+        'Column 1': isTimeout
           ? 'Processing timed out. Document may be too large or complex. Try a clearer image or smaller PDF.'
           : 'Extraction encountered an issue. Please try again or edit this data manually.',
-        amount: 0,
-        type: 'other',
-        category: 'other',
-        gst: 0,
-        reference: '',
-        confidence: 0.05,
       }];
 
       // Save partial result to DB
@@ -968,8 +960,11 @@ async function handleProcess(request) {
           .insert({
             upload_id,
             document_type: 'other',
-            structured_json: { rows: partialRows },
-            summary: { total_rows: 1, total_amount: 0 },
+            structured_json: { 
+              columns: partialColumns,
+              rows: partialRows 
+            },
+            summary: { total_rows: 1, total_columns: 1 },
             confidence_score: 0.05,
           })
           .select()
@@ -994,8 +989,9 @@ async function handleProcess(request) {
             id: partialRecord?.id || upload_id,
             upload_id,
             document_type: 'other',
+            columns: partialColumns,
             rows: partialRows,
-            summary: { total_rows: 1, total_amount: 0 },
+            summary: { total_rows: 1, total_columns: 1 },
             confidence_score: 0.05,
             partial: true,
             partial_message: isTimeout
@@ -1016,8 +1012,9 @@ async function handleProcess(request) {
             id: upload_id,
             upload_id,
             document_type: 'other',
+            columns: partialColumns,
             rows: partialRows,
-            summary: { total_rows: 1, total_amount: 0 },
+            summary: { total_rows: 1, total_columns: 1 },
             confidence_score: 0.05,
             partial: true,
             partial_message: 'Extraction failed. Your credit has been refunded.',
@@ -1066,12 +1063,14 @@ async function handleGetResult(request, id) {
     if (resultData.uploads.user_id !== user.id) return jsonResponse({ error: 'Not authorized' }, 403);
 
     const rows = resultData.edited_json?.rows || resultData.structured_json?.rows || [];
+    const columns = resultData.edited_json?.columns || resultData.structured_json?.columns || [];
 
     return jsonResponse({
       result: {
         id: resultData.id,
         upload_id: resultData.upload_id,
         document_type: resultData.document_type,
+        columns,
         rows,
         summary: resultData.summary,
         confidence_score: resultData.confidence_score,

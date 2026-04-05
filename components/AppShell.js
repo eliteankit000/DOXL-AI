@@ -19,8 +19,8 @@ import {
   Plus, Minus, RefreshCw, FileDown, BarChart3, Sparkles, ChevronDown, Info, ShieldCheck
 } from 'lucide-react';
 
-// Dynamic import of SpreadsheetEditor to avoid SSR issues with Handsontable
-const SpreadsheetEditor = dynamic(() => import('@/components/SpreadsheetEditor'), {
+// Dynamic import of SpreadsheetEditor to avoid SSR issues with AG Grid
+const SpreadsheetEditor = dynamic(() => import('@/components/SpreadsheetEditorAG'), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center py-12">
@@ -1294,7 +1294,53 @@ const ResultView = ({ result, onBack }) => {
         </div>
       )}
 
-      {/* Spreadsheet Editor (Handsontable) */}
+      {/* Spreadsheet Toolbar */}
+      <Card>
+        <CardContent className="py-3 px-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => spreadsheetRef.current?.addRow()}
+                title="Add Row"
+              >
+                <Plus className="w-4 h-4 mr-1" /> Row
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => spreadsheetRef.current?.addColumn()}
+                title="Add Column"
+              >
+                <Plus className="w-4 h-4 mr-1" /> Column
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => spreadsheetRef.current?.deleteSelectedRows()}
+                title="Delete Selected Rows"
+              >
+                <Minus className="w-4 h-4 mr-1" /> Delete Selected
+              </Button>
+              <Separator orientation="vertical" className="h-6" />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => spreadsheetRef.current?.toggleFullscreen()}
+                title="Toggle Fullscreen"
+              >
+                <RefreshCw className="w-4 h-4 mr-1" /> Fullscreen
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Right-click cells for more options • Ctrl+Z to undo • Ctrl+C/V to copy/paste
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Spreadsheet Editor (AG Grid) */}
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           <SpreadsheetEditor
@@ -1306,8 +1352,8 @@ const ResultView = ({ result, onBack }) => {
       </Card>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <p>Right-click for options (add/delete rows & columns). Ctrl+Z to undo. Ctrl+C/V to copy/paste.</p>
-        <p>Keyboard: Arrow keys to navigate, Enter to edit, Tab to move.</p>
+        <p>Double-click cells to edit • Click column headers to sort • Drag column borders to resize</p>
+        <p>Keyboard: Arrow keys to navigate • Enter to edit • Tab to move • Escape to cancel</p>
       </div>
     </div>
   );
