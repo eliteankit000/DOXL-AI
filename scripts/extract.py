@@ -480,13 +480,14 @@ async def main():
         log_step('done', f'Completed in {elapsed}s')
         print(json.dumps(result, ensure_ascii=False))
         
-if __name__ == '__main__':
-    asyncio.run(main())
-)
+    except Exception as e:
+        log_step('fatal', f'Fatal error: {e}')
+        # NEVER FAIL - return empty dataset
+        elapsed = round(time.time() - start_time, 2)
         fallback = {
             'document_type': 'other',
-            'columns': ['Error'],
-            'rows': [{'Error': 'Extraction encountered an error. Please try again.'}],
+            'columns': [],
+            'rows': [],
             'processing_time_seconds': elapsed,
             'partial': True
         }
