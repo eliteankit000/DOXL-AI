@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 // Dynamic import of SpreadsheetEditor to avoid SSR issues with AG Grid
+// IMPORTANT: forwardRef is required for refs to work with dynamic imports
 const SpreadsheetEditor = dynamic(() => import('@/components/SpreadsheetEditorAG'), {
   ssr: false,
   loading: () => (
@@ -1197,7 +1198,22 @@ const DataTable = ({ data, onUpdate }) => {
 // ============= RESULT VIEW (CLEAN SPREADSHEET ONLY) =============
 const ResultView = ({ result, onBack }) => {
   const [currentRows, setCurrentRows] = useState(result?.rows || []);
+  const [spreadsheetReady, setSpreadsheetReady] = useState(false);
   const spreadsheetRef = useRef(null);
+
+  // Check if spreadsheet is ready after a short delay
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (spreadsheetRef.current) {
+        setSpreadsheetReady(true);
+        console.log('[ResultView] ✅ Spreadsheet ref is ready:', spreadsheetRef.current);
+      } else {
+        console.warn('[ResultView] ⚠️ Spreadsheet ref is still null');
+      }
+    }, 1000); // Wait 1 second for component to mount
+
+    return () => clearTimeout(timer);
+  }, [currentRows]);
 
   const handleUpdate = (newRows) => {
     setCurrentRows(newRows);
@@ -1285,6 +1301,10 @@ const ResultView = ({ result, onBack }) => {
             ref={spreadsheetRef}
             rows={currentRows}
             onUpdate={handleUpdate}
+            onReady={() => {
+              console.log('[ResultView] onReady callback fired');
+              setSpreadsheetReady(true);
+            }}
           />
         </CardContent>
       </Card>
