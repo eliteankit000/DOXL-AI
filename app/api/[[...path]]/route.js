@@ -96,14 +96,20 @@ async function ensurePythonDeps() {
   const pythonExec = await getPythonPath();
   const deps = ['openai', 'pdfplumber', 'python-dateutil', 'Pillow'];
   try {
-    await execFileAsync(pythonExec, ['-m', 'pip', 'install', '--quiet', ...deps], {
+    // Use --break-system-packages for Render.com and similar environments (Python 3.11+)
+    await execFileAsync(pythonExec, [
+      '-m', 'pip', 'install', 
+      '--quiet',
+      '--break-system-packages',
+      ...deps
+    ], {
       timeout: 120000,
       env: { PATH: process.env.PATH },
     });
     _depsInstalled = true;
-    console.log('[ensurePythonDeps] deps ready');
+    console.log('[ensurePythonDeps] ✅ deps ready');
   } catch (e) {
-    console.error('[ensurePythonDeps] install error (non-fatal):', e.message?.substring(0, 200));
+    console.error('[ensurePythonDeps] install error (non-fatal):', e.message?.substring(0, 300));
     _depsInstalled = true; // Don't retry on every request
   }
 }
