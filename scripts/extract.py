@@ -394,7 +394,7 @@ async def classify_document(file_path, is_image):
                 }
             ]
         else:
-            text_content = str(file_path)[:8000]
+            text_content = str(file_path)[:15000]
             messages = [
                 {"role": "system", "content": CLASSIFICATION_PROMPT},
                 {"role": "user", "content": f"Classify this document. Return ONLY JSON.\n\n{text_content}"}
@@ -458,7 +458,7 @@ async def extract_with_mode(file_path, is_image, doc_type, user_requirements='',
                 }
             ]
         else:
-            text_content = str(file_path)[:12000]
+            text_content = str(file_path)[:30000]
             messages = [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"Extract all data from this text into a clean spreadsheet table. Return ONLY JSON.\n\n{text_content}"}
@@ -1308,13 +1308,29 @@ async def handle_pdf(file_path, user_requirements):
             log_step('pdf', f'PDF image processing failed: {e}')
             return await run_pipeline(text, is_image=False, user_requirements=user_requirements)
     else:
-        # Text PDF — for large documents, process in page-sized chunks
+        # Text PDF — ALWAYS try full text first, only chunk for very large docs
         pages_to_process = min(page_count, 6)
         text_for_processing = '\n'.join(page_texts[:pages_to_process])
 
-        # If document is very large (>6000 chars), chunk by pages
-        if len(text_for_processing) > 6000 and pages_to_process > 1:
-            log_step('pdf', f'Large text PDF ({len(text_for_processing)} chars) - chunked page processing')
+        log_step('pdf', f'Text PDF ({len(text_for_processing)} chars, {pages_to_process} pages) - full text extraction')
+
+        # Strategy: Always try full text first (GPT-4o handles up to ~30K chars easily)
+        # Only fall back to page-by-page chunking if full text extraction fails
+        result = await run_pipeline(text_for_processing, is_image=False, user_requirements=user_requirements)
+
+        # Check if full text extraction produced meaningful results
+        row_count = len(result.get('rows', []))
+        is_good = row_count > 0 and not result.get('partial', False)
+
+        if is_good:
+            log_step('pdf', f'Full text extraction successful: {row_count} rows')
+            if page_count > 6:
+                result['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
+            return result
+
+        # Fallback: chunk by pages for very large documents or when full text fails
+        if pages_to_process > 1 and len(text_for_processing) > 3000:
+            log_step('pdf', f'Full text extraction poor ({row_count} rows), trying page-by-page chunking')
             all_results = []
 
             for i in range(pages_to_process):
@@ -1330,25 +1346,18 @@ async def handle_pdf(file_path, user_requirements):
 
             if all_results:
                 merged = merge_multipage_results(all_results)
-                if page_count > 6:
-                    merged['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
-                return merged
-            else:
-                # Fallback: send full text at once
-                log_step('pdf', 'Chunked processing failed, trying full text')
-                result = await run_pipeline(text_for_processing, is_image=False, user_requirements=user_requirements)
-                if page_count > 6:
-                    result['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
-                return result
-        else:
-            # Small text PDF — process all at once
-            log_step('pdf', 'Text PDF - extracting from text')
-            result = await run_pipeline(text_for_processing, is_image=False, user_requirements=user_requirements)
+                merged_rows = len(merged.get('rows', []))
+                # Use chunked result only if it's better than full text result
+                if merged_rows > row_count:
+                    log_step('pdf', f'Chunked extraction better: {merged_rows} vs {row_count} rows')
+                    if page_count > 6:
+                        merged['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
+                    return merged
 
-            if page_count > 6:
-                result['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
-
-            return result
+        # Return whatever we got from full text (even if partial)
+        if page_count > 6:
+            result['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
+        return result
 
 
 def merge_multipage_results(all_results):
