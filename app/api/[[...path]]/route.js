@@ -913,18 +913,26 @@ async function handleProcess(request) {
       if (result.processing_time_seconds) {
         responsePayload.processing_time_seconds = result.processing_time_seconds;
       }
+      // Include blocks for layout-preserved documents (invoices)
+      if (result.blocks && Array.isArray(result.blocks) && result.blocks.length > 0) {
+        responsePayload.blocks = result.blocks;
+      }
 
       console.log(`[handleProcess] 📊 Extracted ${normalizedRows.length} rows, ${columns.length} columns`);
+
+      // Build structured_json — include blocks for layout-preserved documents (invoices)
+      const structuredJson = { columns, rows: normalizedRows };
+      if (result.blocks && Array.isArray(result.blocks) && result.blocks.length > 0) {
+        structuredJson.blocks = result.blocks;
+        console.log(`[handleProcess] 📐 Layout blocks: ${result.blocks.length} sections`);
+      }
 
       const { data: resultRecord, error: resultErr } = await supabase
         .from('results')
         .insert({
           upload_id,
           document_type: result.document_type || 'other',
-          structured_json: { 
-            columns,
-            rows: normalizedRows 
-          },
+          structured_json: structuredJson,
           summary,
           confidence_score: result.confidence || 0.85,
         })
@@ -1080,8 +1088,9 @@ async function handleGetResult(request, id) {
 
     const rows = resultData.edited_json?.rows || resultData.structured_json?.rows || [];
     const columns = resultData.edited_json?.columns || resultData.structured_json?.columns || [];
+    const blocks = resultData.edited_json?.blocks || resultData.structured_json?.blocks || null;
 
-    return jsonResponse({
+    const responseObj = {
       result: {
         id: resultData.id,
         upload_id: resultData.upload_id,
@@ -1093,7 +1102,14 @@ async function handleGetResult(request, id) {
         file_name: resultData.uploads.file_name,
         created_at: resultData.created_at,
       },
-    });
+    };
+
+    // Include blocks for layout-preserved documents (invoices)
+    if (blocks && Array.isArray(blocks) && blocks.length > 0) {
+      responseObj.result.blocks = blocks;
+    }
+
+    return jsonResponse(responseObj);
   } catch (error) {
     console.error('[handleGetResult] error:', error);
     captureException(error);
@@ -1252,89 +1268,191 @@ async function handleExportExcel(request, id) {
 
     const ExcelJS = (await import('exceljs')).default;
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Extracted Data');
 
-    // Dynamic columns from extraction result
-    const dynamicColumns = resultData.edited_json?.columns
-      || resultData.structured_json?.columns
-      || [];
-    const rows = resultData.edited_json?.rows || resultData.structured_json?.rows || [];
+    // Check if result has blocks (invoice layout-preserved format)
+    const blocks = resultData.edited_json?.blocks
+      || resultData.structured_json?.blocks
+      || null;
 
-    // Build Excel columns dynamically
-    const excelColumns = [{ header: '#', key: '_row_number', width: 6 }];
-    const internalKeys = new Set(['row_number', '_row_number', '_confidence', '_balance', '_count']);
+    if (blocks && Array.isArray(blocks) && blocks.length > 0) {
+      // ═══════════════════════════════════════════════════
+      // MULTI-BLOCK EXCEL EXPORT (Invoice Layout Preservation)
+      // ═══════════════════════════════════════════════════
+      const worksheet = workbook.addWorksheet('Invoice');
 
-    if (dynamicColumns.length > 0) {
-      // Use detected columns from AI extraction
-      dynamicColumns.forEach(col => {
-        if (!internalKeys.has(col)) {
-          const isNumeric = /amount|debit|credit|balance|total|price|rate|tax|gst|cgst|sgst|igst|quantity|qty|discount|subtotal|net|gross|charge|fee|cost|value|salary/i.test(col);
-          excelColumns.push({
-            header: col,
-            key: col,
-            width: Math.max(12, Math.min(col.length + 6, 40)),
-            style: isNumeric ? { numFmt: '#,##0.00' } : {},
+      // Style constants
+      const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
+      const headerFont = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      const sectionTitleFont = { bold: true, size: 12, color: { argb: 'FF1D4ED8' } };
+      const sectionTitleFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FE' } };
+      const kvLabelFont = { bold: true, size: 10 };
+      const kvValueFont = { size: 10 };
+      const borderStyle = { style: 'thin', color: { argb: 'FFD0D5DD' } };
+      const allBorders = { top: borderStyle, left: borderStyle, bottom: borderStyle, right: borderStyle };
+
+      let currentRow = 1;
+
+      for (const block of blocks) {
+        const blockType = block.type || 'key_value';
+        const blockTitle = block.title || '';
+
+        // Add section title
+        if (blockTitle) {
+          const titleRow = worksheet.getRow(currentRow);
+          titleRow.getCell(1).value = blockTitle;
+          titleRow.getCell(1).font = sectionTitleFont;
+          titleRow.getCell(1).fill = sectionTitleFill;
+          worksheet.mergeCells(currentRow, 1, currentRow, 4);
+          titleRow.getCell(1).border = allBorders;
+          currentRow++;
+        }
+
+        if (blockType === 'key_value' && block.data && typeof block.data === 'object') {
+          // Render key-value pairs as Field | Value table
+          const entries = Object.entries(block.data);
+
+          for (const [field, value] of entries) {
+            const row = worksheet.getRow(currentRow);
+            row.getCell(1).value = field;
+            row.getCell(1).font = kvLabelFont;
+            row.getCell(1).border = allBorders;
+            row.getCell(2).value = value !== null && value !== undefined ? String(value) : '';
+            row.getCell(2).font = kvValueFont;
+            row.getCell(2).border = allBorders;
+            // Merge value across columns 2-4 for wider space
+            worksheet.mergeCells(currentRow, 2, currentRow, 4);
+            currentRow++;
+          }
+        } else if (blockType === 'table' && block.columns && block.rows) {
+          // Render table with headers
+          const cols = block.columns;
+
+          // Set column widths based on table columns
+          cols.forEach((col, idx) => {
+            const colNum = idx + 1;
+            const existing = worksheet.getColumn(colNum).width || 12;
+            worksheet.getColumn(colNum).width = Math.max(existing, Math.min(col.length + 6, 40));
           });
+
+          // Header row
+          const headerRow = worksheet.getRow(currentRow);
+          cols.forEach((col, idx) => {
+            const cell = headerRow.getCell(idx + 1);
+            cell.value = col;
+            cell.font = headerFont;
+            cell.fill = headerFill;
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            cell.border = allBorders;
+          });
+          currentRow++;
+
+          // Data rows
+          for (const rowData of block.rows) {
+            const dataRow = worksheet.getRow(currentRow);
+            cols.forEach((col, idx) => {
+              const cell = dataRow.getCell(idx + 1);
+              const val = rowData[col];
+              // Try to parse numeric values
+              const numVal = val !== undefined && val !== null && val !== '' ? parseFloat(String(val).replace(/,/g, '')) : NaN;
+              cell.value = !isNaN(numVal) && /amount|debit|credit|balance|total|price|rate|tax|gst|cgst|sgst|igst|quantity|qty|discount|subtotal|net|gross/i.test(col)
+                ? numVal
+                : (val !== undefined && val !== null ? String(val) : '');
+              cell.border = allBorders;
+              if (!isNaN(numVal) && typeof cell.value === 'number') {
+                cell.alignment = { horizontal: 'right' };
+                cell.numFmt = '#,##0.00';
+              }
+            });
+            currentRow++;
+          }
         }
+
+        // Add empty row between blocks for spacing
+        currentRow++;
+      }
+
+      // Set default column widths
+      worksheet.getColumn(1).width = Math.max(worksheet.getColumn(1).width || 0, 22);
+      worksheet.getColumn(2).width = Math.max(worksheet.getColumn(2).width || 0, 30);
+
+    } else {
+      // ═══════════════════════════════════════════════════
+      // FLAT TABLE EXCEL EXPORT (Bank statements, tables, etc.)
+      // ═══════════════════════════════════════════════════
+      const worksheet = workbook.addWorksheet('Extracted Data');
+
+      const dynamicColumns = resultData.edited_json?.columns
+        || resultData.structured_json?.columns
+        || [];
+      const rows = resultData.edited_json?.rows || resultData.structured_json?.rows || [];
+
+      const excelColumns = [{ header: '#', key: '_row_number', width: 6 }];
+      const internalKeys = new Set(['row_number', '_row_number', '_confidence', '_balance', '_count']);
+
+      if (dynamicColumns.length > 0) {
+        dynamicColumns.forEach(col => {
+          if (!internalKeys.has(col)) {
+            const isNumeric = /amount|debit|credit|balance|total|price|rate|tax|gst|cgst|sgst|igst|quantity|qty|discount|subtotal|net|gross|charge|fee|cost|value|salary/i.test(col);
+            excelColumns.push({
+              header: col,
+              key: col,
+              width: Math.max(12, Math.min(col.length + 6, 40)),
+              style: isNumeric ? { numFmt: '#,##0.00' } : {},
+            });
+          }
+        });
+      } else if (rows.length > 0) {
+        Object.keys(rows[0]).forEach(key => {
+          if (!internalKeys.has(key) && key !== 'confidence') {
+            excelColumns.push({ header: key, key, width: Math.max(12, Math.min(key.length + 6, 40)) });
+          }
+        });
+      }
+
+      excelColumns.push({ header: 'Confidence', key: 'confidence', width: 12 });
+      worksheet.columns = excelColumns;
+
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
+      worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+
+      rows.forEach((row, index) => {
+        const rowData = { _row_number: index + 1 };
+        excelColumns.forEach(col => {
+          if (col.key === '_row_number') return;
+          if (col.key === 'confidence') {
+            rowData.confidence = row.confidence !== undefined ? row.confidence : '';
+            return;
+          }
+          const val = row[col.key];
+          rowData[col.key] = val !== undefined && val !== null ? val : '';
+        });
+        worksheet.addRow(rowData);
       });
-    } else if (rows.length > 0) {
-      // Fallback: infer columns from first row
-      Object.keys(rows[0]).forEach(key => {
-        if (!internalKeys.has(key) && key !== 'confidence') {
-          excelColumns.push({ header: key, key, width: Math.max(12, Math.min(key.length + 6, 40)) });
-        }
-      });
-    }
 
-    // Add confidence column at the end
-    excelColumns.push({ header: 'Confidence', key: 'confidence', width: 12 });
-
-    worksheet.columns = excelColumns;
-
-    // Style header row
-    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
-    worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
-
-    // Add data rows
-    rows.forEach((row, index) => {
-      const rowData = { _row_number: index + 1 };
+      worksheet.addRow({});
+      const totalRowData = { _row_number: '', confidence: '' };
+      let hasTotals = false;
       excelColumns.forEach(col => {
-        if (col.key === '_row_number') return;
-        if (col.key === 'confidence') {
-          rowData.confidence = row.confidence !== undefined ? row.confidence : '';
-          return;
+        if (col.key === '_row_number' || col.key === 'confidence') return;
+        const isNumeric = /amount|debit|credit|balance|total|price|rate|tax|gst|cgst|sgst|igst|quantity|qty|discount|subtotal|net|gross/i.test(col.key);
+        if (isNumeric) {
+          const sum = rows.reduce((s, r) => s + (parseFloat(String(r[col.key] || '0').replace(/,/g, '')) || 0), 0);
+          if (sum !== 0) {
+            totalRowData[col.key] = sum;
+            hasTotals = true;
+          }
         }
-        const val = row[col.key];
-        rowData[col.key] = val !== undefined && val !== null ? val : '';
       });
-      worksheet.addRow(rowData);
-    });
 
-    // Add totals row for numeric columns
-    worksheet.addRow({});
-    const totalRowData = { _row_number: '', confidence: '' };
-    let hasTotals = false;
-    excelColumns.forEach(col => {
-      if (col.key === '_row_number' || col.key === 'confidence') return;
-      const isNumeric = /amount|debit|credit|balance|total|price|rate|tax|gst|cgst|sgst|igst|quantity|qty|discount|subtotal|net|gross/i.test(col.key);
-      if (isNumeric) {
-        const sum = rows.reduce((s, r) => s + (parseFloat(String(r[col.key] || '0').replace(/,/g, '')) || 0), 0);
-        if (sum !== 0) {
-          totalRowData[col.key] = sum;
-          hasTotals = true;
+      if (hasTotals) {
+        const labelCol = excelColumns.find(c => c.key !== '_row_number' && c.key !== 'confidence' && !/amount|debit|credit|balance|total|price|rate|tax|gst|cgst|sgst|igst|quantity|qty|discount|subtotal|net|gross/i.test(c.key));
+        if (labelCol) {
+          totalRowData[labelCol.key] = 'TOTAL';
         }
+        const summaryRow = worksheet.addRow(totalRowData);
+        summaryRow.font = { bold: true };
       }
-    });
-
-    if (hasTotals) {
-      // Find first non-numeric text column for "TOTAL" label
-      const labelCol = excelColumns.find(c => c.key !== '_row_number' && c.key !== 'confidence' && !/amount|debit|credit|balance|total|price|rate|tax|gst|cgst|sgst|igst|quantity|qty|discount|subtotal|net|gross/i.test(c.key));
-      if (labelCol) {
-        totalRowData[labelCol.key] = 'TOTAL';
-      }
-      const summaryRow = worksheet.addRow(totalRowData);
-      summaryRow.font = { bold: true };
     }
 
     await supabase.from('usage_logs').insert({

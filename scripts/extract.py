@@ -114,48 +114,65 @@ CRITICAL:
 
 RETURN ONLY JSON. NO TEXT BEFORE OR AFTER. NO MARKDOWN."""
 
-INVOICE_PROMPT = """You are an expert financial data extraction AI creating PROFESSIONAL Excel spreadsheets.
+INVOICE_PROMPT = """You are an advanced document-to-Excel layout reconstruction engine.
+Convert this invoice into a MULTI-BLOCK structure that PRESERVES the original layout.
 
-DOCUMENT TYPE: INVOICE / BILL
+STEP 1: Detect and extract these SECTIONS from the invoice:
+1. HEADER — Company/Hotel/Business name, logo text, address, GSTIN, contact
+2. INVOICE INFO — Invoice number, date, due date, payment terms
+3. CUSTOMER/BILL TO — Customer name, address, phone, email, GSTIN
+4. LINE ITEMS TABLE — The main itemized table (products/services with qty, rate, amount)
+5. TAX SUMMARY — CGST, SGST, IGST breakdowns, tax totals
+6. TOTALS/PAYMENT — Subtotal, discount, grand total, amount paid, balance due
+7. FOOTER — Terms, bank details, notes, signatures
 
-EXTRACTION STRATEGY - Create TWO sections if applicable:
-
-SECTION A - LINE ITEMS (main data):
-Extract the itemized table with columns like:
-- Sr No / S.No / # → "Sr No"
-- Item / Product / Description / Particulars → "Item"
-- HSN / SAC Code → "HSN Code"  
-- Quantity / Qty → "Quantity"
-- Rate / Unit Price / Price → "Rate"
-- Amount / Total / Value → "Amount"
-- Tax / GST / CGST / SGST / IGST → "Tax"
-- Discount → "Discount"
-- Net Amount / Grand Total → "Net Amount"
-
-SECTION B - METADATA (add as first row if no line items table):
-- Invoice Number, Date, Vendor/Seller, Buyer, GSTIN, Due Date, Payment Terms
-
-RULES:
-1. If document has a clear LINE ITEMS table → extract that as main data
-2. If document is a SINGLE invoice without line items → convert all fields to ONE horizontal row
-3. Numbers: remove currency symbols, keep decimals
-4. Include subtotal/total rows if they exist in the document
+STEP 2: Return EACH section as a separate BLOCK.
 
 RETURN FORMAT:
 {
   "document_type": "invoice",
-  "columns": ["Sr No", "Item", "HSN Code", "Quantity", "Rate", "Amount", "Tax", "Net Amount"],
-  "rows": [
-    {"Sr No": "1", "Item": "Widget A", "HSN Code": "8471", "Quantity": "10", "Rate": "500", "Amount": "5000", "Tax": "900", "Net Amount": "5900"}
-  ],
-  "metadata": {
-    "invoice_number": "INV-001",
-    "date": "15/03/2024",
-    "vendor": "ABC Corp",
-    "gstin": "27AABCU9603R1ZM",
-    "total": "5900"
-  }
+  "blocks": [
+    {
+      "type": "key_value",
+      "title": "Company Details",
+      "data": {"Company Name": "Hotel Kanchan", "GSTIN": "23AAMFS5374B1Z9", "Address": "123 Main Road, Indore"}
+    },
+    {
+      "type": "key_value",
+      "title": "Invoice Details",
+      "data": {"Invoice No": "43", "Date": "06/04/2026", "Due Date": ""}
+    },
+    {
+      "type": "key_value",
+      "title": "Customer Details",
+      "data": {"Name": "ABDULLA DHULIAWALA", "Mobile": "9890511164", "GSTIN": ""}
+    },
+    {
+      "type": "table",
+      "title": "Line Items",
+      "columns": ["Particular", "Amount", "CGST", "SGST", "Total"],
+      "rows": [
+        {"Particular": "Room Tariff", "Amount": "1619.05", "CGST": "40.48", "SGST": "40.48", "Total": "1700"}
+      ]
+    },
+    {
+      "type": "key_value",
+      "title": "Summary",
+      "data": {"Subtotal": "1619.05", "CGST": "40.48", "SGST": "40.48", "Grand Total": "1700", "Amount Paid": "1700", "Balance Due": "0"}
+    }
+  ]
 }
+
+CRITICAL RULES:
+1. Each section = ONE block. DO NOT merge everything into one table.
+2. key_value blocks: use {"Field": "Value"} format for non-table sections
+3. table blocks: use columns + rows for the LINE ITEMS table
+4. Numbers: remove currency symbols (₹, $, Rs), keep decimals
+5. Dates: DD/MM/YYYY format
+6. Include ALL visible fields from the invoice — don't skip any section
+7. If a section doesn't exist in the document, omit that block
+8. The "Line Items" table block is REQUIRED — even if there's only 1 item
+9. Keep original field names from the invoice where possible
 
 RETURN ONLY JSON. NO TEXT BEFORE OR AFTER. NO MARKDOWN."""
 
@@ -828,6 +845,23 @@ def validate_pass_1_raw(result):
     if not result or not isinstance(result, dict):
         return None, 'Not a valid dict'
 
+    # Handle invoice blocks format — if blocks exist, that's valid
+    blocks = result.get('blocks', None)
+    if blocks and isinstance(blocks, list) and len(blocks) > 0:
+        # Validate blocks have required structure
+        has_valid_block = False
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get('type', '')
+            if btype == 'table' and block.get('columns') and block.get('rows'):
+                has_valid_block = True
+            elif btype == 'key_value' and block.get('data'):
+                has_valid_block = True
+        if has_valid_block:
+            log_step('validate', f'Pass 1: Valid blocks format with {len(blocks)} blocks')
+            return result, None
+
     columns = result.get('columns', [])
     rows = result.get('rows', [])
 
@@ -853,6 +887,10 @@ def validate_pass_1_raw(result):
 
 def validate_pass_2_structure(result):
     """PASS 2: Structure correction - fix column alignment issues."""
+    # Skip structure correction for blocks format — handled in format_output
+    if result.get('blocks'):
+        return result, None
+
     columns = result.get('columns', [])
     rows = result.get('rows', [])
 
@@ -899,6 +937,10 @@ def validate_pass_2_structure(result):
 
 def validate_pass_3_data(result):
     """PASS 3: Data validation - normalize values, remove empty rows."""
+    # Skip data validation for blocks format — handled in format_output
+    if result.get('blocks'):
+        return result, None
+
     columns = result.get('columns', [])
     rows = result.get('rows', [])
 
@@ -1065,12 +1107,16 @@ def score_result(result):
 
 def format_output(result):
     """Stage 10-12: Final formatting for Excel-quality output."""
+
+    # ── Handle invoice blocks format ──
+    blocks = result.get('blocks', None)
+    if blocks and isinstance(blocks, list):
+        result = convert_blocks_to_flat(result)
+
     columns = result.get('columns', [])
     rows = result.get('rows', [])
 
     # Remove internal fields from output rows
-    internal_keys = {'_confidence', '_balance', '_count'}
-    
     clean_rows = []
     for row in rows:
         clean_row = {}
@@ -1082,7 +1128,7 @@ def format_output(result):
             elif not isinstance(val, str):
                 val = str(val)
             clean_row[col] = val
-        
+
         # Store confidence separately
         conf = row.get('_confidence', 0.85)
         clean_row['confidence'] = conf
@@ -1090,6 +1136,50 @@ def format_output(result):
 
     result['columns'] = columns
     result['rows'] = clean_rows
+    return result
+
+
+def convert_blocks_to_flat(result):
+    """Convert invoice blocks format into flat columns/rows for SpreadsheetEditor,
+    while preserving blocks for Excel export."""
+    blocks = result.get('blocks', [])
+    if not blocks:
+        return result
+
+    # Find the main LINE ITEMS table block
+    table_block = None
+    kv_blocks = []
+    for block in blocks:
+        if block.get('type') == 'table' and block.get('columns') and block.get('rows'):
+            if table_block is None or len(block.get('rows', [])) > len(table_block.get('rows', [])):
+                table_block = block
+        elif block.get('type') == 'key_value' and block.get('data'):
+            kv_blocks.append(block)
+
+    if table_block:
+        # Use the table block as the primary flat data
+        result['columns'] = table_block['columns']
+        result['rows'] = table_block['rows']
+    elif kv_blocks:
+        # No table found — convert all key-value blocks into a single horizontal row
+        all_columns = []
+        merged_row = {}
+        for kv in kv_blocks:
+            data = kv.get('data', {})
+            for key, value in data.items():
+                clean_key = normalize_column_name(key)
+                if clean_key not in merged_row:
+                    all_columns.append(clean_key)
+                    merged_row[clean_key] = str(value) if value else ''
+        result['columns'] = all_columns
+        result['rows'] = [merged_row] if merged_row else []
+    else:
+        result['columns'] = []
+        result['rows'] = []
+
+    # KEEP blocks for Excel export — this is the key for layout preservation
+    result['blocks'] = blocks
+    log_step('blocks', f'Converted {len(blocks)} blocks → flat: {len(result["columns"])} cols, {len(result["rows"])} rows')
     return result
 
 
@@ -1110,6 +1200,20 @@ def create_fallback_result():
 
 def final_quality_check(result):
     """Stage 13: Final quality validation before output."""
+    # For blocks format, check blocks have content
+    if result.get('blocks'):
+        blocks = result['blocks']
+        has_data = False
+        for block in blocks:
+            if block.get('type') == 'table' and block.get('rows'):
+                has_data = True
+            elif block.get('type') == 'key_value' and block.get('data'):
+                has_data = True
+        if has_data:
+            log_step('quality', f'PASS (blocks): {len(blocks)} blocks')
+            return True
+        # Fall through to check flat format
+
     columns = result.get('columns', [])
     rows = result.get('rows', [])
 
