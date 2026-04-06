@@ -469,7 +469,7 @@ async def extract_with_mode(file_path, is_image, doc_type, user_requirements='',
         response = await client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
-            max_tokens=4096,
+            max_tokens=16384,
             temperature=0
         )
 
@@ -1150,61 +1150,81 @@ def final_quality_check(result):
 async def run_pipeline(file_path, is_image, user_requirements='', max_attempts=4):
     """Master pipeline: runs all 13 stages in sequence."""
     
-    # ── STAGE 1-3: Classify document ──
-    classification = await classify_document(file_path, is_image)
-    doc_type = classification.get('document_type', 'table')
-    
-    # ── STAGE 3-13: Extract + Validate with retry ──
-    for attempt in range(max_attempts):
-        # Stage 3: Mode-specific extraction
-        result = await extract_with_mode(file_path, is_image, doc_type, user_requirements, attempt)
+    try:
+        # ── STAGE 1-3: Classify document ──
+        classification = await classify_document(file_path, is_image)
+        doc_type = classification.get('document_type', 'table')
         
-        if not result:
-            log_step('pipeline', f'Attempt {attempt + 1}: No result from AI')
-            continue
-
-        # Preserve document_type and metadata
-        result['document_type'] = result.get('document_type', doc_type)
-        metadata = result.get('metadata', None)
-
-        # Stage 7-9: Multi-pass validation (includes stages 5-6)
-        validated = multi_pass_validate(result)
+        last_raw_result = None  # Keep track of last raw result for fallback
         
-        if not validated:
-            log_step('pipeline', f'Attempt {attempt + 1}: Validation failed')
-            continue
+        # ── STAGE 3-13: Extract + Validate with retry ──
+        for attempt in range(max_attempts):
+            try:
+                # Stage 3: Mode-specific extraction
+                result = await extract_with_mode(file_path, is_image, doc_type, user_requirements, attempt)
+                
+                if not result:
+                    log_step('pipeline', f'Attempt {attempt + 1}: No result from AI')
+                    continue
 
-        # Stage 8: Error correction
-        validated = fix_shifted_columns(validated)
-        validated = fix_merged_text(validated)
+                last_raw_result = result  # Save for fallback
+                
+                # Preserve document_type and metadata
+                result['document_type'] = result.get('document_type', doc_type)
+                metadata = result.get('metadata', None)
 
-        # Stage 9: Confidence scoring
-        validated = score_result(validated)
+                # Stage 7-9: Multi-pass validation (includes stages 5-6)
+                validated = multi_pass_validate(result)
+                
+                if not validated:
+                    log_step('pipeline', f'Attempt {attempt + 1}: Validation failed')
+                    continue
 
-        # Stage 9: Confidence-aware repair
-        avg_confidence = validated.get('confidence', 0)
-        if avg_confidence < 0.4 and attempt < max_attempts - 1:
-            log_step('pipeline', f'Low confidence ({avg_confidence}), retrying with different mode')
-            doc_type = 'table'  # Fall back to generic table mode
-            continue
+                # Stage 8: Error correction
+                validated = fix_shifted_columns(validated)
+                validated = fix_merged_text(validated)
 
-        # Stage 10-12: Output formatting
-        validated = format_output(validated)
-        validated['document_type'] = result.get('document_type', doc_type)
-        if metadata:
-            validated['metadata'] = metadata
+                # Stage 9: Confidence scoring
+                validated = score_result(validated)
 
-        # Stage 13: Final quality check
-        if final_quality_check(validated):
-            log_step('pipeline', f'Pipeline complete: {len(validated["columns"])} cols, {len(validated["rows"])} rows')
-            return validated
-        else:
-            log_step('pipeline', f'Attempt {attempt + 1}: Quality check failed')
-            continue
+                # Stage 9: Confidence-aware repair
+                avg_confidence = validated.get('confidence', 0)
+                if avg_confidence < 0.4 and attempt < max_attempts - 1:
+                    log_step('pipeline', f'Low confidence ({avg_confidence}), retrying with different mode')
+                    doc_type = 'table'  # Fall back to generic table mode
+                    continue
 
-    # NEVER FAIL: Return fallback
-    log_step('pipeline', 'All attempts exhausted, returning fallback')
-    return create_fallback_result()
+                # Stage 10-12: Output formatting
+                validated = format_output(validated)
+                validated['document_type'] = result.get('document_type', doc_type)
+                if metadata:
+                    validated['metadata'] = metadata
+
+                # Stage 13: Final quality check
+                if final_quality_check(validated):
+                    log_step('pipeline', f'Pipeline complete: {len(validated["columns"])} cols, {len(validated["rows"])} rows')
+                    return validated
+                else:
+                    log_step('pipeline', f'Attempt {attempt + 1}: Quality check failed')
+                    continue
+            except Exception as attempt_err:
+                log_step('pipeline', f'Attempt {attempt + 1} error: {attempt_err}')
+                continue
+
+        # If we have a raw result that just failed validation, try to return it as-is
+        if last_raw_result and last_raw_result.get('rows') and last_raw_result.get('columns'):
+            log_step('pipeline', 'Returning raw result (validation failed but data exists)')
+            last_raw_result['partial'] = True
+            last_raw_result['confidence'] = 0.5
+            return last_raw_result
+
+        # NEVER FAIL: Return fallback
+        log_step('pipeline', 'All attempts exhausted, returning fallback')
+        return create_fallback_result()
+
+    except Exception as e:
+        log_step('pipeline', f'Pipeline fatal error: {e}')
+        return create_fallback_result()
 
 
 # ═══════════════════════════════════════════════════════
@@ -1212,23 +1232,27 @@ async def run_pipeline(file_path, is_image, user_requirements='', max_attempts=4
 # ═══════════════════════════════════════════════════════
 
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF using pdfplumber."""
+    """Extract text from PDF using pdfplumber — returns per-page text too."""
     try:
         import pdfplumber
-        text = ''
+        full_text = ''
+        page_texts = []
         page_count = 0
         with pdfplumber.open(file_path) as pdf:
             page_count = len(pdf.pages)
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
-                    text += page_text + '\n'
-        log_step('pdf', f'Extracted {len(text)} chars from {page_count} pages')
-        is_scanned = len(text.strip()) < 80
-        return text, is_scanned, page_count
+                    full_text += page_text + '\n'
+                    page_texts.append(page_text)
+                else:
+                    page_texts.append('')
+        log_step('pdf', f'Extracted {len(full_text)} chars from {page_count} pages')
+        is_scanned = len(full_text.strip()) < 80
+        return full_text, is_scanned, page_count, page_texts
     except Exception as e:
         log_step('pdf', f'PDF extraction failed: {e}')
-        return '', True, 0
+        return '', True, 0, []
 
 
 async def handle_image(file_path, user_requirements):
@@ -1238,7 +1262,7 @@ async def handle_image(file_path, user_requirements):
 
 async def handle_pdf(file_path, user_requirements):
     """Process PDF file through 13-stage pipeline."""
-    text, is_scanned, page_count = extract_text_from_pdf(file_path)
+    text, is_scanned, page_count, page_texts = extract_text_from_pdf(file_path)
 
     if is_scanned or len(text.strip()) < 80:
         log_step('pdf', 'Scanned PDF - converting to images')
@@ -1270,7 +1294,6 @@ async def handle_pdf(file_path, user_requirements):
             if not all_results:
                 return await run_pipeline(file_path, is_image=False, user_requirements=user_requirements)
 
-            # Merge results from all pages with column reconciliation
             merged = merge_multipage_results(all_results)
 
             if page_count > 6:
@@ -1285,16 +1308,47 @@ async def handle_pdf(file_path, user_requirements):
             log_step('pdf', f'PDF image processing failed: {e}')
             return await run_pipeline(text, is_image=False, user_requirements=user_requirements)
     else:
-        # Text PDF
-        log_step('pdf', 'Text PDF - extracting from text')
-        result = await run_pipeline(text, is_image=False, user_requirements=user_requirements)
+        # Text PDF — for large documents, process in page-sized chunks
+        pages_to_process = min(page_count, 6)
+        text_for_processing = '\n'.join(page_texts[:pages_to_process])
 
-        if page_count > 6:
-            result['page_warning'] = (
-                f"Only the first 6 of {page_count} pages were processed."
-            )
+        # If document is very large (>6000 chars), chunk by pages
+        if len(text_for_processing) > 6000 and pages_to_process > 1:
+            log_step('pdf', f'Large text PDF ({len(text_for_processing)} chars) - chunked page processing')
+            all_results = []
 
-        return result
+            for i in range(pages_to_process):
+                page_text = page_texts[i] if i < len(page_texts) else ''
+                if not page_text or len(page_text.strip()) < 30:
+                    continue
+
+                log_step('pdf', f'Processing text page {i + 1}/{pages_to_process}')
+                page_result = await run_pipeline(page_text, is_image=False, user_requirements=user_requirements)
+
+                if page_result and page_result.get('rows'):
+                    all_results.append(page_result)
+
+            if all_results:
+                merged = merge_multipage_results(all_results)
+                if page_count > 6:
+                    merged['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
+                return merged
+            else:
+                # Fallback: send full text at once
+                log_step('pdf', 'Chunked processing failed, trying full text')
+                result = await run_pipeline(text_for_processing, is_image=False, user_requirements=user_requirements)
+                if page_count > 6:
+                    result['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
+                return result
+        else:
+            # Small text PDF — process all at once
+            log_step('pdf', 'Text PDF - extracting from text')
+            result = await run_pipeline(text_for_processing, is_image=False, user_requirements=user_requirements)
+
+            if page_count > 6:
+                result['page_warning'] = f"Only the first 6 of {page_count} pages were processed."
+
+            return result
 
 
 def merge_multipage_results(all_results):

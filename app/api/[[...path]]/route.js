@@ -763,8 +763,8 @@ async function handleProcess(request) {
         [scriptPath, tempFilePath, user_requirements || ''],
         {
           cwd: projectRoot,
-          timeout: 180000,
-          maxBuffer: 10 * 1024 * 1024,
+          timeout: 240000,
+          maxBuffer: 20 * 1024 * 1024,
           env: {
             OPENAI_API_KEY: process.env.OPENAI_API_KEY,
             PATH: process.env.PATH,
@@ -777,6 +777,16 @@ async function handleProcess(request) {
         console.error('[handleProcess] stdout output:', out.substring(0, 500));
         // If the script still produced valid JSON on stdout despite non-zero exit, use it
         if (out) return { stdout: out, stderr: errStr };
+        // Check if stderr contains actual JSON output (pipeline writes logs to stderr but result to stdout)
+        // Sometimes the process exits non-zero but the pipeline completed and wrote to stderr
+        if (errStr) {
+          // Look for JSON in stderr (the pipeline fallback always outputs JSON)
+          const jsonMatch = errStr.match(/\{[\s\S]*"columns"[\s\S]*"rows"[\s\S]*\}/);
+          if (jsonMatch) {
+            console.log('[handleProcess] Found JSON result in stderr');
+            return { stdout: jsonMatch[0], stderr: '' };
+          }
+        }
         throw new Error('Script failed: ' + errStr.substring(0, 300));
       });
 
