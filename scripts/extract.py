@@ -1276,6 +1276,7 @@ async def run_pipeline(file_path, is_image, user_requirements='', max_attempts=4
                 # Preserve document_type and metadata
                 result['document_type'] = result.get('document_type', doc_type)
                 metadata = result.get('metadata', None)
+                has_blocks = bool(result.get('blocks'))
 
                 # Stage 7-9: Multi-pass validation (includes stages 5-6)
                 validated = multi_pass_validate(result)
@@ -1284,29 +1285,32 @@ async def run_pipeline(file_path, is_image, user_requirements='', max_attempts=4
                     log_step('pipeline', f'Attempt {attempt + 1}: Validation failed')
                     continue
 
-                # Stage 8: Error correction
-                validated = fix_shifted_columns(validated)
-                validated = fix_merged_text(validated)
-
-                # Stage 9: Confidence scoring
-                validated = score_result(validated)
-
-                # Stage 9: Confidence-aware repair
-                avg_confidence = validated.get('confidence', 0)
-                if avg_confidence < 0.4 and attempt < max_attempts - 1:
-                    log_step('pipeline', f'Low confidence ({avg_confidence}), retrying with different mode')
-                    doc_type = 'table'  # Fall back to generic table mode
-                    continue
-
-                # Stage 10-12: Output formatting
+                # Stage 10-12: Output formatting — MUST run BEFORE scoring
+                # for blocks format, this converts blocks → flat columns/rows
                 validated = format_output(validated)
                 validated['document_type'] = result.get('document_type', doc_type)
                 if metadata:
                     validated['metadata'] = metadata
 
+                # Stage 8: Error correction (on flat data)
+                validated = fix_shifted_columns(validated)
+                validated = fix_merged_text(validated)
+
+                # Stage 9: Confidence scoring (now has flat rows to score)
+                validated = score_result(validated)
+
+                # Stage 9: Confidence-aware repair
+                # SKIP retry for blocks format — blocks are valid even with few rows
+                avg_confidence = validated.get('confidence', 0)
+                if not has_blocks and avg_confidence < 0.4 and attempt < max_attempts - 1:
+                    log_step('pipeline', f'Low confidence ({avg_confidence}), retrying with different mode')
+                    doc_type = 'table'  # Fall back to generic table mode
+                    continue
+
                 # Stage 13: Final quality check
                 if final_quality_check(validated):
-                    log_step('pipeline', f'Pipeline complete: {len(validated["columns"])} cols, {len(validated["rows"])} rows')
+                    block_info = f', {len(validated.get("blocks", []))} blocks' if validated.get('blocks') else ''
+                    log_step('pipeline', f'Pipeline complete: {len(validated["columns"])} cols, {len(validated["rows"])} rows{block_info}')
                     return validated
                 else:
                     log_step('pipeline', f'Attempt {attempt + 1}: Quality check failed')
@@ -1316,11 +1320,16 @@ async def run_pipeline(file_path, is_image, user_requirements='', max_attempts=4
                 continue
 
         # If we have a raw result that just failed validation, try to return it as-is
-        if last_raw_result and last_raw_result.get('rows') and last_raw_result.get('columns'):
-            log_step('pipeline', 'Returning raw result (validation failed but data exists)')
-            last_raw_result['partial'] = True
-            last_raw_result['confidence'] = 0.5
-            return last_raw_result
+        if last_raw_result:
+            has_data = (last_raw_result.get('rows') and last_raw_result.get('columns')) or last_raw_result.get('blocks')
+            if has_data:
+                log_step('pipeline', 'Returning raw result (validation failed but data exists)')
+                # Convert blocks if present
+                if last_raw_result.get('blocks') and not last_raw_result.get('columns'):
+                    last_raw_result = convert_blocks_to_flat(last_raw_result)
+                last_raw_result['partial'] = True
+                last_raw_result['confidence'] = 0.5
+                return last_raw_result
 
         # NEVER FAIL: Return fallback
         log_step('pipeline', 'All attempts exhausted, returning fallback')
