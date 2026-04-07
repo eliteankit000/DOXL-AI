@@ -1,6 +1,6 @@
 # 📊 DocXL AI - AI-Powered Document to Excel Converter
 
-> Transform PDFs, invoices, bank statements, and images into structured Excel spreadsheets in seconds using GPT-4o.
+> Transform PDFs, invoices, bank statements, and images into structured Excel spreadsheets **with EXACT VISUAL LAYOUT PRESERVATION** using GPT-4o.
 
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green)](https://supabase.com/)
@@ -11,13 +11,16 @@
 
 ## 🚀 Features
 
-### ✨ Core Functionality
-- **AI-Powered Extraction**: Uses OpenAI GPT-4o with 3-pass pipeline (detect → extract → validate)
-- **Multi-Format Support**: PDF, JPG, PNG, WEBP (up to 100MB)
-- **Intelligent Detection**: Automatically identifies invoices, bank statements, receipts, tables
-- **Real-Time Editing**: Edit extracted data before downloading
-- **Excel Export**: Download as `.xlsx` with formatting and totals
-- **User-Guided Extraction**: Specify custom requirements for targeted data extraction
+### ✨ Core Functionality - **NEW v6.0: Layout Reconstruction Engine**
+- **🎯 VISUAL LAYOUT PRESERVATION**: Recreates document inside Excel with EXACT original layout
+- **📐 Bounding Box Detection**: Uses GPT-4o Vision to analyze element positioning (X/Y coordinates)
+- **🧩 Smart Block Classification**: Detects headers, titles, key-value sections, tables, paragraphs, totals, footers
+- **📍 Positional Mapping**: Maps document coordinates to Excel grid (X→column, Y→row)
+- **📄 Multi-Page Support**: Handles up to 10 pages with separate Excel sheets (Page 1, Page 2, Page 3...)
+- **🎨 Style Preservation**: Bold headers, text alignment (left/center/right), merged cells, spacing
+- **📊 Multi-Format Support**: PDF, JPG, PNG, WEBP (up to 100MB)
+- **✏️ Real-Time Editing**: Edit extracted data before downloading
+- **🎯 User-Guided Extraction**: Specify custom requirements for targeted data extraction
 
 ### 🔒 Security & Privacy
 - ✅ End-to-end encryption (TLS + AES-256)
@@ -51,9 +54,58 @@
 | **Database** | Supabase (PostgreSQL) |
 | **Storage** | Supabase Storage |
 | **Auth** | Supabase Auth (JWT) |
-| **AI** | OpenAI GPT-4o (direct API) |
+| **AI** | OpenAI GPT-4o Vision (direct API) |
 | **Payments** | Razorpay (IN), Paddle (Global) |
 | **Hosting** | Vercel |
+
+---
+
+## 🧠 v6.0 Architecture: 11-Stage Layout Reconstruction Pipeline
+
+### **Stage 1: Page Detection & Multi-Page Handling**
+- Extracts individual pages from PDFs (max 10 pages)
+- Converts each page to high-resolution image
+- Returns list of base64-encoded page images
+
+### **Stage 2-3: Full Document Layout Analysis**
+- GPT-4o Vision analyzes visual structure
+- Detects bounding boxes for all elements
+- Identifies text alignment, spacing, hierarchy
+- Classifies sections (header/title/key-value/table/paragraph/totals/footer)
+
+### **Stage 4-5: Positional Reconstruction**
+- Maps X coordinates → Excel columns (0-100 scale → A-L columns)
+- Maps Y coordinates → Excel rows (vertical positioning)
+- Detects spacing between elements → empty rows/columns
+- Preserves reading flow (top-to-bottom, left-to-right)
+
+### **Stage 6-7: Text & Data Extraction**
+- Extracts text content from each block
+- Normalizes data (removes currency symbols, standardizes dates)
+- Maintains original values for layout preservation
+
+### **Stage 8-9: Style & Merge Detection**
+- Detects bold text (headers, titles, totals)
+- Identifies alignment (left/center/right)
+- Determines merged cell regions for titles/headers
+
+### **Stage 10: Excel Grid Generation**
+- Converts layout analysis to Excel cell instructions
+- Format: `{row: N, col: M, value: "text", merge: [start, end], style: {...}}`
+- Each cell positioned exactly based on document layout
+
+### **Stage 11: Multi-Sheet Assembly**
+- Creates separate worksheet per page
+- Assembles final output: `{sheets: [{name: "Page 1", cells: [...]}]}`
+- Returns layout-preserved structure for Excel export
+
+### **Excel Export Engine**
+- Renders from layout instructions (not sequential rows)
+- Places cells at exact row/column positions
+- Applies merged cells, styles, column widths
+- Generates multi-sheet workbook for multi-page documents
+
+**Result:** Excel file that LOOKS like the original document, not just extracted data.
 
 ---
 
