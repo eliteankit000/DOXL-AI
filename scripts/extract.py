@@ -314,10 +314,38 @@ def detect_merges(cells: List[Dict], columns: List[float]) -> List[Dict]:
 # STAGE 7: MULTI-PAGE ASSEMBLY
 # ═══════════════════════════════════════════════════════════════════
 
+def convert_cells_to_rows_columns(cells: List[Dict]) -> Tuple[List[str], List[Dict]]:
+    """
+    Convert cell-based format to rows/columns format for frontend table display.
+    Returns: (columns, rows)
+    """
+    if not cells:
+        return ([], [])
+    
+    # Find unique columns
+    max_col = max(cell['col'] for cell in cells)
+    columns = [f"Col {i}" for i in range(1, max_col + 1)]
+    
+    # Group cells by row
+    rows_dict = defaultdict(dict)
+    for cell in cells:
+        col_name = f"Col {cell['col']}"
+        rows_dict[cell['row']][col_name] = cell['value']
+    
+    # Convert to list of row objects
+    rows = []
+    for row_num in sorted(rows_dict.keys()):
+        row_obj = {}
+        for col_name in columns:
+            row_obj[col_name] = rows_dict[row_num].get(col_name, '')
+        rows.append(row_obj)
+    
+    return (columns, rows)
+
 def assemble_pages(elements: List[Dict]) -> Dict:
     """
     Assemble multi-page document into sheets.
-    Returns: {sheets: [{name, cells}]}
+    Returns: {sheets: [{name, cells}], rows: [...], columns: [...]}
     """
     log_step("ASSEMBLY", "Assembling pages into sheets")
     
@@ -327,6 +355,7 @@ def assemble_pages(elements: List[Dict]) -> Dict:
         pages[elem['page']].append(elem)
     
     sheets = []
+    all_cells = []  # Combine all cells for rows/columns format
     
     for page_num in sorted(pages.keys()):
         page_elements = pages[page_num]
@@ -345,16 +374,22 @@ def assemble_pages(elements: List[Dict]) -> Dict:
         }
         
         sheets.append(sheet)
+        all_cells.extend(cells)
+    
+    # Convert to rows/columns format for frontend table display
+    flat_columns, flat_rows = convert_cells_to_rows_columns(all_cells)
     
     result = {
         'document_type': 'layout_preserved',
         'pages': len(sheets),
         'sheets': sheets,
+        'columns': flat_columns,  # For frontend table display
+        'rows': flat_rows,        # For frontend table display
         'confidence': 0.95,
         'extraction_method': 'coordinate_based_v7'
     }
     
-    log_step("ASSEMBLY", f"Assembled {len(sheets)} sheet(s)")
+    log_step("ASSEMBLY", f"Assembled {len(sheets)} sheet(s), {len(flat_rows)} rows, {len(flat_columns)} columns")
     return result
 
 # ═══════════════════════════════════════════════════════════════════

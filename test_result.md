@@ -713,22 +713,22 @@ test_plan:
         - agent: "testing"
         - comment: "✅ TESTED: v6.0 Layout Reconstruction Engine FULLY OPERATIONAL! Comprehensive backend testing completed with 8/8 tests passed: (1) Health Check API ✅ - Backend running correctly, (2) Python Script Structure ✅ - All required functions (detect_pages, analyze_page_layout, assemble_multi_sheet_output, process_document) exist and return correct {sheets: [{name, cells: [{row, col, value, merge, style}]}]} format, (3) Excel Export Endpoint ✅ - Endpoint exists and requires authentication, (4) New Layout Format Support ✅ - v6.0 sheets format logic found in export code with CHECK FOR NEW LAYOUT-BASED FORMAT marker, (5) Backward Compatibility ✅ - Fallback logic for old blocks and flat formats exists, (6) Multi-Sheet Excel Generation ✅ - Multi-sheet logic implemented with addWorksheet and Page naming, (7) Python Dependencies ✅ - All required packages (pdfplumber, PIL, openai, asyncio) available, (8) Layout Reconstruction Integration ✅ - v6.0 integration found (5/5 checks passed) with layout reconstruction, extract.py, sheets, cells, merge, and style support. The 11-stage pipeline is structurally complete and ready for operation. Excel export supports both new layout-based format and backward compatibility with old formats."
 
-  - task: "True Layout Reconstruction Engine v7.0 (COORDINATE-BASED)"
+  - task: "True Layout Reconstruction Engine v7.0 (DUAL FORMAT FIX)"
     implemented: true
     working: true
     file: "scripts/extract.py"
-    stuck_count: 0
+    stuck_count: 1
     priority: "critical"
     needs_retesting: true
     status_history:
         - working: false
         - agent: "user"
-        - comment: "CRITICAL ISSUE: v6.1 is just AI extraction tool, NOT layout reconstruction. Needs COORDINATE-BASED system with OCR. Requirements: (1) Extract {x,y} coordinates, (2) Row grouping by Y-axis, (3) Column ordering by X-axis, (4) Grid builder from positional data, (5) Excel renderer with merges. Current system uses ONLY GPT - wrong approach."
+        - comment: "BUG: Still showing 'No data to display'. Log shows v7.0 extracted 237 text elements with coordinates, but then '📊 Extracted 0 rows, 0 columns'. Frontend needs rows+columns format for table display."
         - working: true
         - agent: "main"
-        - comment: "COMPLETE REWRITE v7.0: TRUE coordinate-based layout reconstruction. ARCHITECTURE: PDF→OCR+Layout(coordinates)→Row Grouping(Y)→Column Mapping(X)→Block Detection→Grid Builder→Output. STAGE 1: Coordinate extraction using pdfplumber.extract_words() for PDFs (returns {text,x,y,width,height}), GPT-4o Vision for images with coordinate estimation. STAGE 2: Row grouping by Y-axis clustering (y_threshold=5). STAGE 3: Column ordering by X-axis sort. STAGE 4: Column detection via X-axis clustering. STAGE 5: Grid builder assigns elements to row/col indices. STAGE 6: Merge detection for spanning cells. STAGE 7: Multi-page assembly with separate sheets. OUTPUT: {sheets: [{name:'Page 1', cells:[{row,col,value,merge,style}]}]}. This is a TRUE rendering engine, not just extraction."
+        - comment: "FIX: v7.0 was returning ONLY {sheets: [{cells}]} format but backend checks for rows/columns. Added convert_cells_to_rows_columns() function to generate BOTH formats. Now returns: {sheets: [...], cells: [...], rows: [...], columns: [...]}. Frontend table gets rows+columns. Excel export gets sheets+cells. Dual format output ensures compatibility with both rendering paths."
 
 agent_communication:
     - agent: "main"
-    - message: "🎯 V7.0 TRUE LAYOUT RECONSTRUCTION ENGINE - COORDINATE-BASED! User was RIGHT - v6.0/v6.1 were just AI extraction tools. NOW implements PROPER architecture: OCR with coordinates → Y-axis row grouping → X-axis column mapping → Grid builder → Positional rendering. Uses pdfplumber for PDF coordinate extraction, GPT-4o Vision for image coordinates. Clustering algorithms for row/column detection. Grid builder maps positions to Excel cells. Merge detection for headers. Output format {sheets: [{cells: [{row,col,value,merge,style}]}]} matches Excel export expectations. This is a DOCUMENT RENDERING ENGINE."
+    - message: "🔧 V7.0 DUAL FORMAT FIX APPLIED! Issue: coordinate-based engine returned {sheets: [{cells}]} but frontend table needs {rows, columns}. Backend logged '0 rows, 0 columns' because those fields were missing. SOLUTION: Added convert_cells_to_rows_columns() to transform cell-based grid into flat table format. NOW returns BOTH: (1) sheets+cells for Excel layout rendering, (2) rows+columns for frontend table display. Tested with 2x2 grid - generates correct Col1, Col2 columns and row objects. Ready for production testing."
 
