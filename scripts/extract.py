@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-DocXL AI — Enterprise Document Layout Reconstruction Engine v6.0
-11-STAGE LAYOUT-AWARE PIPELINE: Detect → Analyze → Position → Reconstruct → Export
-
-PRIMARY OBJECTIVE: Recreate document inside Excel with EXACT VISUAL LAYOUT
-- Same structure, same positioning, same spacing
-- NOT just data extraction — FULL VISUAL RECONSTRUCTION
-- Uses bounding boxes, X/Y mapping to Excel grid
+DocXL AI — Fast Document Extraction Engine v6.1
+OPTIMIZED FOR SPEED: 5-10 second processing with layout awareness
 """
 import sys
 import os
@@ -17,8 +12,6 @@ import re
 import time
 from pathlib import Path
 from openai import AsyncOpenAI
-from datetime import datetime
-from typing import Dict, List, Any, Tuple, Optional
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 if not OPENAI_API_KEY:
@@ -38,241 +31,147 @@ def log_step(step, msg, extra=None):
     print(f'[{step}] {msg}', file=sys.stderr)
 
 # ═══════════════════════════════════════════════════════════════════
-# STAGE 1: PAGE DETECTION & MULTI-PAGE HANDLING
+# FAST EXTRACTION PROMPT (Optimized for Speed)
 # ═══════════════════════════════════════════════════════════════════
 
-async def detect_pages(file_path: str, file_ext: str) -> List[str]:
-    """
-    Detect and extract individual pages as base64 images.
-    Returns list of base64 image strings (one per page, max 10 pages).
-    """
-    log_step("STAGE_1", f"Detecting pages from {file_ext} file")
-    
-    pages = []
-    
-    if file_ext in ['.pdf']:
-        # Extract pages from PDF
-        try:
-            import pdfplumber
-            from PIL import Image
-            import io
-            
-            with pdfplumber.open(file_path) as pdf:
-                total_pages = min(len(pdf.pages), 10)  # Max 10 pages
-                log_step("STAGE_1", f"PDF detected: {total_pages} pages (limit 10)")
-                
-                for i in range(total_pages):
-                    page = pdf.pages[i]
-                    # Convert PDF page to image
-                    pil_image = page.to_image(resolution=150).original
-                    
-                    # Convert PIL Image to base64
-                    buffer = io.BytesIO()
-                    pil_image.save(buffer, format='PNG')
-                    img_bytes = buffer.getvalue()
-                    img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-                    pages.append(img_base64)
-                    
-                log_step("STAGE_1", f"Extracted {len(pages)} pages from PDF")
-        except Exception as e:
-            log_step("STAGE_1_ERROR", f"PDF extraction failed: {e}")
-            # Fallback: treat as single-page image
-            with open(file_path, 'rb') as f:
-                img_base64 = base64.b64encode(f.read()).decode('utf-8')
-                pages.append(img_base64)
-    else:
-        # Single image file
-        with open(file_path, 'rb') as f:
-            img_base64 = base64.b64encode(f.read()).decode('utf-8')
-            pages.append(img_base64)
-        log_step("STAGE_1", f"Single page image detected")
-    
-    return pages
+FAST_EXTRACTION_PROMPT = """You are a high-performance AI document processing engine optimized for SPEED and EFFICIENCY.
 
-# ═══════════════════════════════════════════════════════════════════
-# STAGE 2-10: LAYOUT ANALYSIS ENGINE
-# ═══════════════════════════════════════════════════════════════════
+Your task is to extract and structure data from documents within seconds while maintaining high accuracy.
 
-LAYOUT_ANALYSIS_PROMPT = """You are an enterprise-grade Document Layout Reconstruction Engine.
+---
 
-Your task is to analyze this document page and create COMPLETE LAYOUT INSTRUCTIONS for Excel recreation.
+# 🎯 PRIMARY GOAL
 
-## 🎯 PRIMARY OBJECTIVE
-Recreate the document inside Excel with EXACT VISUAL LAYOUT:
-✔ Same structure ✔ Same positioning ✔ Same spacing ✔ Same reading flow
+✔ Fast processing
+✔ Clean structured output
+✔ Excel-ready format
 
-## 📐 STAGE 2: FULL DOCUMENT LAYOUT ANALYSIS
+---
 
-Analyze using:
-- Bounding boxes (X, Y positions of ALL elements)
-- Text alignment (left/center/right)
-- Spacing between elements
-- Section grouping
-- Visual hierarchy
+# 🧠 STEP 1: FAST DOCUMENT CLASSIFICATION
 
-## 🧠 STAGE 3: BLOCK DETECTION
+Quickly classify into:
+- bank_statement (has Date, Description, Debit/Credit, Balance)
+- invoice (has line items, invoice number, totals)
+- form (key-value pairs, application forms)
+- table (generic structured data)
+- receipt (short transaction summary)
+- mixed (multiple sections)
 
-Split document into layout blocks with COORDINATES:
+---
 
-1. **HEADER** (logo, company info) — top section
-2. **TITLE** (invoice title, document name) — centered/bold
-3. **KEY-VALUE SECTIONS** (invoice no, date, customer details) — label: value pairs
-4. **TABLES** (line items, transaction history) — structured rows/columns
-5. **PARAGRAPHS** (terms, notes) — text blocks
-6. **TOTALS/SUMMARY** (grand total, subtotal) — right-aligned numbers
-7. **FOOTER** (bank details, signatures) — bottom section
+# ⚡ STEP 2: EXTRACT ESSENTIAL DATA
 
-For EACH block, detect:
-- X position (left margin, 0-100 scale)
-- Y position (top margin, 0-100 scale)
-- Width (how wide the block is)
-- Height (how tall the block is)
-- Alignment (left/center/right)
-- Style (bold/normal)
+**IF bank statement:**
+→ Extract transaction table with: Date, Description, Debit, Credit, Balance
 
-## 🧠 STAGE 4-5: POSITIONAL RECONSTRUCTION
+**IF invoice:**
+→ Extract:
+  - Invoice metadata (Invoice No, Date, Customer)
+  - Line items table (Item, Quantity, Price, Amount)
+  - Totals (Subtotal, Tax, Grand Total)
 
-Map document coordinates to Excel grid:
+**IF form:**
+→ Extract all key-value pairs as columns
 
-**HORIZONTAL MAPPING (X → Column):**
-- Document width divided into ~12 columns (like Excel default view)
-- X=0-8 → Column A (col 1)
-- X=8-16 → Column B (col 2)
-- X=16-25 → Column C (col 3)
-- ... and so on
-- X=92-100 → Column L (col 12)
+**IF table:**
+→ Extract table with headers and rows
 
-**VERTICAL MAPPING (Y → Row):**
-- Each text line ≈ 1 row
-- Spacing between sections = empty rows
-- Y=0-2 → Row 1
-- Y=2-4 → Row 2
-- Small gap (2-4 units) → +1 empty row
-- Large gap (>4 units) → +2-3 empty rows
+---
 
-## 🧠 STAGE 6-9: RENDERING RULES
+# 🚀 STEP 3: OUTPUT FORMAT (STRICT)
 
-### A. TEXT BLOCKS
-Place text in exact relative position using merged cells where needed.
-
-### B. KEY-VALUE PAIRS
-Place side-by-side (label in col A, value in col B) at correct row position.
-
-### C. TABLES
-Detect real tables, preserve exact column count and row order.
-
-### D. SPACING
-Insert empty rows/columns to match layout spacing.
-
-## 🧠 STAGE 10: EXCEL CELL STRUCTURE
-
-Return structured layout instructions:
+Return ONLY JSON:
 
 ```json
 {
-  "page_number": 1,
-  "max_row": 40,
-  "max_col": 12,
-  "blocks": [
-    {
-      "type": "header",
-      "x": 0,
-      "y": 0,
-      "width": 100,
-      "height": 10,
-      "content": "Hotel Kanchan\\nMain Road, Indore",
-      "align": "center",
-      "bold": true
-    },
-    {
-      "type": "key_value",
-      "x": 0,
-      "y": 15,
-      "width": 50,
-      "items": [
-        {"label": "Invoice No", "value": "43"},
-        {"label": "Date", "value": "06/04/2026"}
-      ]
-    },
-    {
-      "type": "table",
-      "x": 0,
-      "y": 30,
-      "width": 100,
-      "columns": ["Particular", "Amount", "CGST", "SGST", "Total"],
-      "rows": [
-        {"Particular": "Room Tariff", "Amount": "1619.05", "CGST": "40.48", "SGST": "40.48", "Total": "1700"}
-      ],
-      "header_bold": true
-    },
-    {
-      "type": "total",
-      "x": 70,
-      "y": 80,
-      "label": "Grand Total",
-      "value": "1700",
-      "align": "right",
-      "bold": true
-    }
+  "document_type": "bank_statement|invoice|form|table|receipt|mixed",
+  "columns": ["Column1", "Column2", "Column3"],
+  "rows": [
+    {"Column1": "value", "Column2": "value", "Column3": "value"}
   ],
-  "cells": [
-    {"row": 1, "col": 1, "value": "Hotel Kanchan", "merge": [1, 12], "style": {"bold": true, "align": "center"}},
-    {"row": 2, "col": 1, "value": "Main Road, Indore", "merge": [1, 12], "style": {"align": "center"}},
-    {"row": 5, "col": 1, "value": "Invoice No"},
-    {"row": 5, "col": 2, "value": "43"},
-    {"row": 6, "col": 1, "value": "Date"},
-    {"row": 6, "col": 2, "value": "06/04/2026"},
-    {"row": 10, "col": 1, "value": "Particular", "style": {"bold": true}},
-    {"row": 10, "col": 5, "value": "Amount", "style": {"bold": true, "align": "right"}},
-    {"row": 11, "col": 1, "value": "Room Tariff"},
-    {"row": 11, "col": 5, "value": "1619.05", "style": {"align": "right"}},
-    {"row": 30, "col": 10, "value": "Grand Total", "style": {"bold": true}},
-    {"row": 30, "col": 12, "value": "1700", "style": {"bold": true, "align": "right"}}
-  ]
+  "confidence": 0.95
 }
 ```
 
-## ✅ CRITICAL RULES:
+---
 
-1. **DETECT ALL VISIBLE ELEMENTS** — every text block, every number, every label
-2. **PRESERVE SPACING** — if there's a gap in the document, add empty rows in Excel
-3. **USE MERGED CELLS** for titles that span multiple columns
-4. **MAINTAIN ALIGNMENT** — left/center/right alignment must match original
-5. **BOLD HEADERS** — make table headers and section titles bold
-6. **NO DATA LOSS** — all visible data must be included
-7. **POSITIONAL ACCURACY** — elements should be at approximately correct row/col positions
-8. **READING FLOW** — top-to-bottom, left-to-right flow should be preserved
+# ⚠️ CRITICAL RULES
 
-## 📊 OUTPUT FORMAT:
+1. **ALWAYS return columns + rows** — NEVER return empty arrays
+2. **Clean column names** — Title Case, no special characters
+3. **One row per record** — Each transaction/item = one row
+4. **Remove currency symbols** — Keep only numbers (₹, $, Rs. → remove)
+5. **Date format** — DD/MM/YYYY
+6. **Numbers only** — No commas in numeric values
+7. **All visible data** — Don't skip any rows from tables
 
-Return ONLY JSON with this structure:
+---
+
+# 🧠 EXAMPLES
+
+**Example 1: Bank Statement**
+```json
 {
-  "page_number": 1,
-  "max_row": <estimated rows needed>,
-  "max_col": 12,
-  "cells": [
-    {"row": <1-based row number>, "col": <1-based col number>, "value": "<text>", "merge": [<start_col>, <end_col>], "style": {"bold": true/false, "align": "left|center|right"}}
-  ]
+  "document_type": "bank_statement",
+  "columns": ["Date", "Description", "Debit", "Credit", "Balance"],
+  "rows": [
+    {"Date": "15/01/2024", "Description": "ATM Withdrawal", "Debit": "5000", "Credit": "", "Balance": "45000"}
+  ],
+  "confidence": 0.95
 }
+```
 
-**IMPORTANT:**
-- "merge" is optional, use only when cell should span multiple columns. Format: [start_col, end_col] inclusive.
-- "style" is optional, only include if bold=true or align is not "left"
-- Keep "value" as strings (even for numbers)
-- Row and col numbers are 1-based (row 1 = first row)
+**Example 2: Invoice**
+```json
+{
+  "document_type": "invoice",
+  "columns": ["Invoice No", "Date", "Item", "Quantity", "Price", "Amount", "Tax", "Total"],
+  "rows": [
+    {"Invoice No": "43", "Date": "06/04/2026", "Item": "Room Tariff", "Quantity": "1", "Price": "1619.05", "Amount": "1619.05", "Tax": "80.95", "Total": "1700"}
+  ],
+  "confidence": 0.92
+}
+```
 
-RETURN ONLY THE JSON. NO TEXT BEFORE OR AFTER. NO MARKDOWN BLOCKS."""
+**Example 3: Form**
+```json
+{
+  "document_type": "form",
+  "columns": ["Name", "Email", "Phone", "Address"],
+  "rows": [
+    {"Name": "John Doe", "Email": "john@email.com", "Phone": "9876543210", "Address": "123 Main St"}
+  ],
+  "confidence": 0.88
+}
+```
 
-async def analyze_page_layout(page_base64: str, page_num: int, user_requirements: str = "") -> Dict[str, Any]:
+---
+
+# 🎯 FINAL REMINDER
+
+- Return ONLY the JSON object
+- NO text before or after
+- NO markdown blocks
+- NO explanations
+- Ensure columns and rows are NEVER empty
+
+Return the JSON now:"""
+
+# ═══════════════════════════════════════════════════════════════════
+# SINGLE-PASS FAST EXTRACTION
+# ═══════════════════════════════════════════════════════════════════
+
+async def extract_from_image(image_base64: str, user_requirements: str = "") -> dict:
     """
-    Analyze a single page and generate Excel layout instructions.
-    Uses GPT-4o Vision for layout-aware extraction.
+    Fast single-pass extraction optimized for speed.
+    Target: 5-10 seconds per page.
     """
-    log_step("STAGE_2-10", f"Analyzing layout for page {page_num}")
+    log_step("EXTRACTION", "Starting fast extraction")
     
-    prompt = LAYOUT_ANALYSIS_PROMPT
+    prompt = FAST_EXTRACTION_PROMPT
     if user_requirements:
-        prompt += f"\n\n**USER REQUIREMENTS:** {user_requirements}\nPay special attention to these requirements while extracting."
+        prompt += f"\n\n**USER REQUIREMENTS:** {user_requirements}\nPay special attention to these requirements."
     
     try:
         response = await client.chat.completions.create(
@@ -285,115 +184,189 @@ async def analyze_page_layout(page_base64: str, page_num: int, user_requirements
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{page_base64}",
+                                "url": f"data:image/png;base64,{image_base64}",
                                 "detail": "high"
                             }
                         }
                     ]
                 }
             ],
-            max_tokens=16384,
+            max_tokens=8192,
             temperature=0.1
         )
         
         raw_output = response.choices[0].message.content.strip()
-        log_step("STAGE_2-10", f"GPT-4o response received for page {page_num}")
+        log_step("EXTRACTION", f"GPT-4o response received ({len(raw_output)} chars)")
         
         # Extract JSON from response
         json_match = re.search(r'\{.*\}', raw_output, re.DOTALL)
-        if json_match:
-            layout_data = json.loads(json_match.group())
-            layout_data['page_number'] = page_num
-            
-            # Ensure required fields
-            if 'cells' not in layout_data:
-                layout_data['cells'] = []
-            if 'max_row' not in layout_data:
-                layout_data['max_row'] = 50
-            if 'max_col' not in layout_data:
-                layout_data['max_col'] = 12
-            
-            log_step("STAGE_2-10", f"Page {page_num} layout extracted: {len(layout_data.get('cells', []))} cells")
-            return layout_data
-        else:
+        if not json_match:
+            log_step("EXTRACTION_ERROR", "No JSON found in response")
             raise ValueError("No JSON found in GPT-4o response")
+        
+        result = json.loads(json_match.group())
+        
+        # Validate required fields
+        if 'columns' not in result or 'rows' not in result:
+            log_step("EXTRACTION_ERROR", "Missing columns or rows in response")
+            raise ValueError("Invalid format: missing columns or rows")
+        
+        if not result['columns'] or not result['rows']:
+            log_step("EXTRACTION_WARNING", "Empty columns or rows - retrying with fallback")
+            # Fallback: try to extract ANY data
+            return await extract_with_fallback(image_base64, user_requirements)
+        
+        # Add confidence if missing
+        if 'confidence' not in result:
+            result['confidence'] = 0.85
+        
+        # Add document_type if missing
+        if 'document_type' not in result:
+            result['document_type'] = 'table'
+        
+        log_step("EXTRACTION_SUCCESS", f"Extracted {len(result['rows'])} rows, {len(result['columns'])} columns")
+        return result
     
     except Exception as e:
-        log_step("STAGE_2-10_ERROR", f"Layout analysis failed for page {page_num}: {e}")
-        # Return minimal fallback structure
-        return {
-            "page_number": page_num,
-            "max_row": 50,
-            "max_col": 12,
-            "cells": [
-                {"row": 1, "col": 1, "value": f"[Error: Could not analyze page {page_num}]"}
-            ]
-        }
+        log_step("EXTRACTION_ERROR", f"Extraction failed: {e}")
+        # Return fallback structure
+        return await extract_with_fallback(image_base64, user_requirements)
 
-# ═══════════════════════════════════════════════════════════════════
-# STAGE 11: MULTI-SHEET ASSEMBLY
-# ═══════════════════════════════════════════════════════════════════
+async def extract_with_fallback(image_base64: str, user_requirements: str = "") -> dict:
+    """
+    Fallback extraction with simplified prompt.
+    """
+    log_step("FALLBACK", "Attempting fallback extraction")
+    
+    fallback_prompt = """Extract ALL data from this document into a table format.
 
-def assemble_multi_sheet_output(page_layouts: List[Dict[str, Any]], file_name: str) -> Dict[str, Any]:
-    """
-    Assemble all page layouts into final multi-sheet structure.
-    """
-    log_step("STAGE_11", f"Assembling {len(page_layouts)} pages into sheets")
+Return ONLY JSON:
+{
+  "document_type": "table",
+  "columns": ["Column1", "Column2"],
+  "rows": [{"Column1": "value", "Column2": "value"}],
+  "confidence": 0.75
+}
+
+CRITICAL: columns and rows must NEVER be empty. Extract at least something from the document."""
     
-    sheets = []
-    for layout in page_layouts:
-        page_num = layout.get('page_number', 1)
-        sheet = {
-            "name": f"Page {page_num}",
-            "max_row": layout.get('max_row', 50),
-            "max_col": layout.get('max_col', 12),
-            "cells": layout.get('cells', [])
-        }
-        sheets.append(sheet)
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": fallback_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{image_base64}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=4096,
+            temperature=0.2
+        )
+        
+        raw_output = response.choices[0].message.content.strip()
+        json_match = re.search(r'\{.*\}', raw_output, re.DOTALL)
+        
+        if json_match:
+            result = json.loads(json_match.group())
+            if result.get('columns') and result.get('rows'):
+                log_step("FALLBACK_SUCCESS", f"Fallback extracted {len(result['rows'])} rows")
+                return result
+    except Exception as e:
+        log_step("FALLBACK_ERROR", f"Fallback failed: {e}")
     
-    result = {
-        "document_type": "layout_preserved",
-        "file_name": file_name,
-        "pages": len(sheets),
-        "sheets": sheets,
-        "confidence": 0.95,  # High confidence for layout-based extraction
-        "extraction_method": "layout_reconstruction_v6"
+    # Ultimate fallback: return minimal structure
+    return {
+        "document_type": "unknown",
+        "columns": ["Content"],
+        "rows": [{"Content": "Extraction failed - please try a clearer image"}],
+        "confidence": 0.0
     }
-    
-    log_step("STAGE_11", f"Multi-sheet assembly complete: {len(sheets)} sheets")
-    return result
 
 # ═══════════════════════════════════════════════════════════════════
-# MAIN PIPELINE ORCHESTRATOR
+# MULTI-PAGE HANDLING
 # ═══════════════════════════════════════════════════════════════════
 
-async def process_document(file_path: str, user_requirements: str = "") -> Dict[str, Any]:
+async def process_pdf_pages(file_path: str, user_requirements: str = "") -> dict:
     """
-    Main pipeline: Processes document with full layout reconstruction.
+    Process multi-page PDF by extracting pages and combining results.
     """
-    file_name = Path(file_path).name
-    file_ext = Path(file_path).suffix.lower()
+    log_step("PDF_PROCESSING", f"Processing PDF: {file_path}")
     
-    log_step("PIPELINE_START", f"Processing {file_name} with layout reconstruction")
+    try:
+        import pdfplumber
+        from PIL import Image
+        import io
+        
+        pages_data = []
+        
+        with pdfplumber.open(file_path) as pdf:
+            total_pages = min(len(pdf.pages), 10)  # Max 10 pages
+            log_step("PDF_PROCESSING", f"PDF has {total_pages} page(s)")
+            
+            for i in range(total_pages):
+                page = pdf.pages[i]
+                
+                # Convert page to image
+                pil_image = page.to_image(resolution=150).original
+                buffer = io.BytesIO()
+                pil_image.save(buffer, format='PNG')
+                img_bytes = buffer.getvalue()
+                img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+                
+                # Extract from this page
+                page_result = await extract_from_image(img_base64, user_requirements)
+                pages_data.append(page_result)
+                
+                log_step("PDF_PROCESSING", f"Page {i+1}/{total_pages} processed: {len(page_result.get('rows', []))} rows")
+        
+        # Combine results from all pages
+        if len(pages_data) == 1:
+            return pages_data[0]
+        else:
+            # Multi-page: combine rows from all pages
+            combined = {
+                "document_type": pages_data[0].get('document_type', 'table'),
+                "columns": pages_data[0].get('columns', []),
+                "rows": [],
+                "confidence": sum(p.get('confidence', 0.85) for p in pages_data) / len(pages_data),
+                "pages": len(pages_data)
+            }
+            
+            for page_data in pages_data:
+                combined['rows'].extend(page_data.get('rows', []))
+            
+            log_step("PDF_PROCESSING", f"Combined {len(combined['rows'])} rows from {len(pages_data)} pages")
+            return combined
     
-    # STAGE 1: Detect pages
-    pages = await detect_pages(file_path, file_ext)
-    log_step("PIPELINE", f"Detected {len(pages)} page(s)")
+    except Exception as e:
+        log_step("PDF_PROCESSING_ERROR", f"PDF processing failed: {e}")
+        # Fallback: treat as image
+        with open(file_path, 'rb') as f:
+            img_base64 = base64.b64encode(f.read()).decode('utf-8')
+            return await extract_from_image(img_base64, user_requirements)
+
+async def process_image(file_path: str, user_requirements: str = "") -> dict:
+    """
+    Process single image file.
+    """
+    log_step("IMAGE_PROCESSING", f"Processing image: {file_path}")
     
-    # STAGE 2-10: Analyze each page layout (max 10 pages)
-    page_layouts = []
-    for i, page_base64 in enumerate(pages[:10], start=1):
-        layout = await analyze_page_layout(page_base64, i, user_requirements)
-        page_layouts.append(layout)
+    with open(file_path, 'rb') as f:
+        img_base64 = base64.b64encode(f.read()).decode('utf-8')
     
-    # STAGE 11: Assemble multi-sheet output
-    result = assemble_multi_sheet_output(page_layouts, file_name)
-    
-    log_step("PIPELINE_COMPLETE", f"Layout reconstruction complete: {len(result['sheets'])} sheets")
-    return result
+    return await extract_from_image(img_base64, user_requirements)
 
 # ═══════════════════════════════════════════════════════════════════
-# ENTRY POINT
+# MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════
 
 async def main():
@@ -409,17 +382,39 @@ async def main():
         print(json.dumps({"error": f"File not found: {file_path}"}))
         sys.exit(1)
     
+    file_ext = Path(file_path).suffix.lower()
+    
     try:
-        result = await process_document(file_path, user_requirements)
+        start_time = time.time()
+        
+        if file_ext == '.pdf':
+            result = await process_pdf_pages(file_path, user_requirements)
+        else:
+            result = await process_image(file_path, user_requirements)
+        
+        elapsed = time.time() - start_time
+        log_step("COMPLETE", f"Processing completed in {elapsed:.2f}s")
+        
+        # Ensure result has required fields
+        if 'columns' not in result:
+            result['columns'] = []
+        if 'rows' not in result:
+            result['rows'] = []
+        if 'confidence' not in result:
+            result['confidence'] = 0.85
+        if 'document_type' not in result:
+            result['document_type'] = 'table'
+        
         print(json.dumps(result, indent=2))
+    
     except Exception as e:
         log_step("FATAL_ERROR", str(e))
         print(json.dumps({
             "error": str(e),
             "document_type": "unknown",
-            "confidence": 0.0,
-            "sheets": [],
-            "logs": LOG_STEPS
+            "columns": [],
+            "rows": [],
+            "confidence": 0.0
         }))
         sys.exit(1)
 
