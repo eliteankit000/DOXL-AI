@@ -8,7 +8,7 @@ import json
 import uuid
 
 # Configuration
-BASE_URL = "https://sheet-genius-22.preview.emergentagent.com/api"
+BASE_URL = "https://visual-doc-converter.preview.emergentagent.com/api"
 HEADERS = {"Content-Type": "application/json"}
 
 def test_fallback_credit_deduction():
