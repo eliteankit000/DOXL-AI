@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-DocXL AI — Production PDF-to-Excel Engine
-DETERMINISTIC ALGORITHMIC APPROACH (NO LLM)
+DocXL AI — Universal Document Processing Script
+Handles both PDF and Images (JPG/PNG) with automatic routing
 
-Uses PyMuPDF for fast word extraction with coordinates.
-Implements table reconstruction using row/column clustering.
-Target: <1-2 seconds per page.
+Architecture:
+- PDF → PyMuPDF extraction
+- Image → OCR (PaddleOCR/Tesseract)
+- Same table reconstruction pipeline for both
 """
 import sys
 import os
@@ -15,10 +16,10 @@ from pathlib import Path
 # Add lib directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 
-from pdf_engine import process_pdf_to_excel
+from pdf_engine.universal_pipeline import process_document_universal
 
 def main():
-    """Entry point for PDF processing script."""
+    """Entry point for universal document processing."""
     if len(sys.argv) < 2:
         print(json.dumps({"error": "Usage: python extract.py <file_path> [user_requirements]"}))
         sys.exit(1)
@@ -30,22 +31,9 @@ def main():
         print(json.dumps({"error": f"File not found: {file_path}"}))
         sys.exit(1)
     
-    file_ext = Path(file_path).suffix.lower()
-    
-    # Only process PDFs with PyMuPDF engine
-    if file_ext != '.pdf':
-        print(json.dumps({
-            "error": "Only PDF files supported by PyMuPDF engine. Use image extraction for images.",
-            "document_type": "unknown",
-            "columns": [],
-            "rows": [],
-            "confidence": 0.0
-        }))
-        sys.exit(1)
-    
     try:
-        # Process PDF with deterministic algorithm
-        result = process_pdf_to_excel(file_path)
+        # Process with universal pipeline (handles PDF and images)
+        result = process_document_universal(file_path)
         
         # Output JSON result
         print(json.dumps(result, indent=2))
