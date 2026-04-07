@@ -84,11 +84,11 @@ def cluster_words_into_rows(words: List[Dict], y_threshold: float = 5.0) -> List
 
 def is_table_row(row: List[Dict]) -> bool:
     """
-    PHASE 1: A row is considered part of a table ONLY if it has at least 3 elements.
+    PHASE 1: A row is considered part of a table if it has at least 2 elements.
     
-    STRICT RULE: Stop mixing non-table data with table data.
+    RELAXED RULE: Accept 2+ elements (was 3+) to handle 2-column tables.
     """
-    return len(row) >= 3
+    return len(row) >= 2  # Changed from 3 to 2 for real-world PDFs
 
 
 def isolate_table_rows(rows: List[List[Dict]]) -> List[List[Dict]]:
@@ -168,15 +168,15 @@ def is_weak_header(header_row: List[Dict], headers: List[str]) -> bool:
     Weak if:
     - No header row found
     - Headers have inconsistent spacing
-    - Too few columns detected (<2)
+    - Too few columns detected (<2) - RELAXED from original
     """
     if not header_row or not headers:
         return True
     
-    if len(headers) < 2:
+    if len(headers) < 1:  # Changed from 2 to 1 - accept single column
         return True
     
-    # Check spacing consistency
+    # Check spacing consistency only if we have 2+ headers
     if len(header_row) >= 2:
         x_positions = [w['x0'] for w in header_row]
         gaps = [x_positions[i+1] - x_positions[i] for i in range(len(x_positions)-1)]
@@ -244,7 +244,7 @@ def build_fallback_columns(table_rows: List[List[Dict]]) -> List[Tuple[float, fl
     
     # Calculate average elements per row
     avg_elements = sum(len(row) for row in table_rows) / len(table_rows)
-    n_columns = max(2, int(round(avg_elements)))
+    n_columns = max(1, int(round(avg_elements)))  # Changed from max(2, ...) to max(1, ...)
     
     # Collect all words from table rows
     all_words = []
