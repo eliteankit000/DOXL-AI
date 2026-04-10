@@ -728,4 +728,33 @@ test_plan:
 agent_communication:
     - agent: "main"
     - message: "🚀 V8.0 PRODUCTION PYMUPDF ENGINE - NITRO PDF QUALITY! User requirements: deterministic, high-performance, NO LLM, near real-time. IMPLEMENTED: Complete modular system with 6 Python modules in lib/pdf_engine/. ARCHITECTURE: PDF→Words(PyMuPDF)→Blocks(gap detection)→Tables(row/column clustering)→Validation(cleaning)→Output. ALGORITHMS: Y-axis row clustering (±5px threshold), X-axis column boundary detection, grid mapping, multi-line merging. PERFORMANCE: Uses PyMuPDF fast C backend, processes only table blocks, fixed thresholds, target <1-2s/page. OUTPUT: {columns, rows} format compatible with existing frontend. ALL COMPONENT TESTS PASSED. Ready for production testing."
+    - agent: "main"
+    - message: "✅ BUG FIXES & SIMPLIFICATION COMPLETE! Simplified UI flow and fixed processing issues:
+    
+    FRONTEND FIXES:
+    - ✅ REMOVED AI Instructions UI (PreProcessReview component deleted)
+    - ✅ REMOVED Processing Steps UI (simplified to single 'Processing document...' text)
+    - ✅ SIMPLIFIED Flow: Upload → Processing → Result (no intermediate screens)
+    - ✅ REMOVED userRequirements state (no AI input needed)
+    - ✅ REMOVED fake delays and step animations
+    - ✅ REMOVED user_requirements from API calls
+    
+    BACKEND FIXES:
+    - ✅ Already BLOCKING - no async/background tasks
+    - ✅ Updated extract.py to use PyMuPDF pipeline (process_document_universal)
+    - ✅ Added RETRY LOGIC for empty tables (falls back to simple text extraction)
+    - ✅ Added comprehensive DEBUG LOGGING (file info, columns/rows, fallback triggers)
+    - ✅ NEVER returns empty output (always falls back)
+    
+    DEPENDENCIES INSTALLED:
+    - ✅ PyMuPDF (fitz)
+    - ✅ opencv-python-headless
+    - ✅ numpy, scipy, scikit-learn
+    
+    System now behaves like NITRO:
+    - Upload file → Click start → Wait → Show output
+    - No stuck processing
+    - No empty output
+    - No multi-step UI
+    - Direct, simple flow"
 

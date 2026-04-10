@@ -53,50 +53,7 @@ const apiFetch = async (url, options = {}) => {
   return response;
 };
 
-// ============= REQUIREMENTS FIELD (PRO-LEVEL) =============
-const INSTRUCTION_SUGGESTIONS = [
-  { label: 'Remove below \u20B91000', value: 'Remove transactions below \u20B91000' },
-  { label: 'Only GST items', value: 'Only include GST items' },
-  { label: 'Group by category', value: 'Group by category' },
-  { label: 'Only debits', value: 'Only include debit transactions' },
-  { label: 'Sort by amount', value: 'Sort by amount descending' },
-  { label: 'Only credits', value: 'Only include credit/income entries' },
-];
-
-const RequirementsField = ({ value, onChange, compact = false }) => (
-  <div className="space-y-3">
-    <div className="relative">
-      <div className="absolute left-3 top-3 pointer-events-none">
-        <Sparkles className="w-4 h-4 text-primary/60" />
-      </div>
-      <textarea
-        id="requirements"
-        className="flex w-full rounded-xl border-2 border-primary/20 bg-gradient-to-br from-primary/[0.02] to-transparent pl-10 pr-4 py-3 text-sm shadow-sm placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:border-primary/40 resize-none transition-all"
-        placeholder="e.g. Remove transactions below &#x20B9;1000, only include GST items, group by category..."
-        rows={compact ? 2 : 3}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        maxLength={500}
-      />
-    </div>
-    <div className="flex items-center justify-between gap-2">
-      <div className="flex flex-wrap gap-1.5">
-        {INSTRUCTION_SUGGESTIONS.map((s, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => onChange(value ? `${value}, ${s.value}` : s.value)}
-            className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border border-primary/20 bg-primary/5 text-primary/80 hover:bg-primary/10 hover:border-primary/30 transition-all cursor-pointer"
-          >
-            <Plus className="w-3 h-3" />
-            {s.label}
-          </button>
-        ))}
-      </div>
-      <span className="text-xs text-muted-foreground whitespace-nowrap">{value.length}/500</span>
-    </div>
-  </div>
-);
+// ============= REQUIREMENTS FIELD - REMOVED (Not needed for simple flow) =============
 
 // ============= FAQ DATA =============
 const FAQ_ITEMS = [
@@ -707,126 +664,45 @@ const UploadBox = ({ onUploadComplete, disabled }) => {
   );
 };
 
-// ============= PRE-PROCESS REVIEW (Upload done, user adds instructions then clicks Extract) =============
-const PreProcessReview = ({ upload, userRequirements, onRequirementsChange, onStartExtraction, onCancel }) => {
-  const fileIcon = upload?.file_type === 'invoice' || upload?.file_name?.endsWith('.pdf')
-    ? <FileText className="w-6 h-6 text-primary" />
-    : <Image className="w-6 h-6 text-primary" />;
+// ============= PRE-PROCESS REVIEW - REMOVED (Direct flow: Upload → Process) =============
 
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          <ChevronRight className="w-4 h-4 rotate-180" />
-        </Button>
-        <h2 className="text-2xl font-bold">Review & Extract</h2>
-      </div>
-
-      {/* Uploaded file card */}
-      <Card className="border-primary/20 bg-primary/[0.02]">
-        <CardContent className="py-5">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0">
-              {fileIcon}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-lg truncate">{upload?.file_name || 'Document'}</p>
-              <div className="flex items-center gap-3 mt-1">
-                <Badge variant="secondary" className="text-xs">{upload?.file_type || 'file'}</Badge>
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Check className="w-3 h-3 text-green-500" /> Uploaded successfully
-                </span>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* AI Instructions */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            AI Instructions
-          </CardTitle>
-          <CardDescription>
-            Tell the AI what to extract or how to process the data. Leave empty for default extraction.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RequirementsField value={userRequirements} onChange={onRequirementsChange} />
-        </CardContent>
-      </Card>
-
-      {/* Action buttons */}
-      <div className="flex items-center gap-3">
-        <Button size="lg" className="flex-1 text-base py-6 shadow-lg hover:shadow-xl transition-all" onClick={onStartExtraction}>
-          <Zap className="w-5 h-5 mr-2" />
-          Start Extraction
-        </Button>
-        <Button size="lg" variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-
-      <p className="text-xs text-muted-foreground text-center">
-        1 credit will be used for this extraction. Processing typically takes 5-15 seconds.
-      </p>
-    </div>
-  );
-};
-
-// ============= PROCESSING VIEW =============
+// ============= PROCESSING VIEW (SIMPLIFIED - NO STEPS) =============
 const ProcessingView = ({ upload, onComplete, onError }) => {
-  const [step, setStep] = useState(0);
   const [error, setError] = useState('');
-  const steps = [
-    { label: 'Upload Complete', desc: 'File received and stored securely' },
-    { label: 'Extracting Data', desc: 'AI is analyzing your document...' },
-    { label: 'Structuring Output', desc: 'Organizing data into rows and columns' },
-  ];
 
   useEffect(() => {
     let cancelled = false;
     const process = async () => {
-      setStep(0);
-      await new Promise(r => setTimeout(r, 800));
-      if (cancelled) return;
-      setStep(1);
       try {
         const res = await apiFetch('/process', {
           method: 'POST',
           body: JSON.stringify({
             upload_id: upload.id,
-            user_requirements: upload.userRequirements || '',
+            user_requirements: '', // No AI instructions
           }),
         });
         const data = await res.json();
 
-        // NEVER FAIL approach: check for result object (even partial)
+        if (cancelled) return;
+
+        // Check for result
         if (data.result) {
-          if (cancelled) return;
-          setStep(2);
-          await new Promise(r => setTimeout(r, 1000));
-          if (cancelled) return;
           onComplete(data.result);
           return;
         }
 
-        // Only show error if truly no result at all
-        if (!res.ok && !data.result) {
-          setError(data.error || 'Processing encountered an issue. Please try again.');
+        // Show error if no result
+        if (!res.ok) {
+          setError(data.error || 'Processing failed. Please try again.');
           if (onError) onError(data.error);
           return;
         }
 
-        if (cancelled) return;
-        setStep(2);
-        await new Promise(r => setTimeout(r, 1000));
-        if (cancelled) return;
+        // Fallback
         onComplete(data.result || data);
       } catch (err) {
-        setError('Network error during processing. Please try again.');
+        if (cancelled) return;
+        setError('Network error. Please try again.');
         if (onError) onError(err.message);
       }
     };
@@ -839,30 +715,18 @@ const ProcessingView = ({ upload, onComplete, onError }) => {
       <Card className="w-full max-w-lg shadow-xl border-0">
         <CardHeader className="text-center">
           <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Sparkles className="w-8 h-8 text-primary animate-pulse" />
+            <Loader2 className="w-8 h-8 text-primary animate-spin" />
           </div>
-          <CardTitle className="text-2xl">Processing Document</CardTitle>
+          <CardTitle className="text-2xl">Processing document...</CardTitle>
           <CardDescription>{upload?.file_name}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {steps.map((s, i) => (
-            <div key={i} className="flex items-start gap-4">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-500
-                ${i < step ? 'bg-green-500 text-white' : i === step ? 'bg-primary text-white animate-pulse' : 'bg-muted text-muted-foreground'}`}>
-                {i < step ? <Check className="w-4 h-4" /> : i === step ? <Loader2 className="w-4 h-4 animate-spin" /> : <span className="text-xs">{i + 1}</span>}
-              </div>
-              <div>
-                <p className={`font-medium ${i <= step ? 'text-foreground' : 'text-muted-foreground'}`}>{s.label}</p>
-                <p className="text-sm text-muted-foreground">{s.desc}</p>
-              </div>
-            </div>
-          ))}
-          {error && (
-            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+        {error && (
+          <CardContent>
+            <div className="p-4 bg-destructive/10 rounded-lg border border-destructive/20">
               <p className="text-sm text-destructive font-medium">{error}</p>
             </div>
-          )}
-        </CardContent>
+          </CardContent>
+        )}
       </Card>
     </div>
   );
@@ -1460,7 +1324,6 @@ const App = () => {
   const [currentResult, setCurrentResult] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [userRequirements, setUserRequirements] = useState('');
 
   // Check Supabase auth on mount + load Razorpay
   useEffect(() => {
@@ -1595,17 +1458,10 @@ const App = () => {
     setView('landing');
   };
 
-  // NEW FLOW: Upload → PreProcess Review → Processing → Result
+  // SIMPLIFIED FLOW: Upload → Processing → Result (No PreProcess Review)
   const handleUploadComplete = (upload) => {
     setCurrentUpload(upload);
-    setUserRequirements('');
-    setView('preprocess');  // Go to review step, not straight to processing
-  };
-
-  const handleStartExtraction = () => {
-    // User clicked "Start Extraction" from PreProcessReview
-    setCurrentUpload(prev => ({ ...prev, userRequirements }));
-    setView('processing');
+    setView('processing');  // Go directly to processing
   };
 
   const handleProcessComplete = (result) => {
@@ -1701,15 +1557,6 @@ const App = () => {
               <h2 className="text-2xl font-bold">Upload Document</h2>
               <UploadBox onUploadComplete={handleUploadComplete} disabled={(user?.credits_remaining ?? 0) <= 0} />
             </div>
-          )}
-          {view === 'preprocess' && currentUpload && (
-            <PreProcessReview
-              upload={currentUpload}
-              userRequirements={userRequirements}
-              onRequirementsChange={setUserRequirements}
-              onStartExtraction={handleStartExtraction}
-              onCancel={() => { setView('dashboard'); setCurrentUpload(null); }}
-            />
           )}
           {view === 'processing' && <ProcessingView upload={currentUpload} onComplete={handleProcessComplete} onError={() => { fetchUploads(); setView('dashboard'); }} />}
           {view === 'result' && currentResult && <ResultView result={currentResult} onBack={() => { setView('dashboard'); fetchUploads(); }} />}
