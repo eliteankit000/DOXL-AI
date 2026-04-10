@@ -88,29 +88,62 @@ async function getPythonPath() {
 }
 
 // =============================================
-// AUTO-INSTALL PYTHON DEPENDENCIES
+// AUTO-INSTALL PYTHON DEPENDENCIES (RUNTIME)
 // =============================================
-let _depsInstalled = false;
+let _depsInstalled = false;  // Reset to false to force installation
+let _installAttempts = 0;
+const MAX_INSTALL_ATTEMPTS = 2;
+
 async function ensurePythonDeps() {
   if (_depsInstalled) return;
+  if (_installAttempts >= MAX_INSTALL_ATTEMPTS) {
+    console.log('[ensurePythonDeps] ⚠️ Max install attempts reached, skipping');
+    return;
+  }
+  
+  _installAttempts++;
   const pythonExec = await getPythonPath();
-  const deps = ['openai', 'pdfplumber', 'python-dateutil', 'Pillow'];
+  
+  // CRITICAL: PyMuPDF must be installed for table extraction
+  const deps = [
+    'PyMuPDF',           // CORE: Fast C backend for PDF processing
+    'opencv-python-headless',  // Image processing for scanned PDFs
+    'numpy',             // Data processing
+    'scipy',             // Scientific computing
+    'scikit-learn',      // Machine learning utilities
+    'pdfplumber',        // Fallback PDF extraction
+    'python-dateutil',   // Date parsing
+    'Pillow'             // Image utilities
+  ];
+  
   try {
+    console.log(`[ensurePythonDeps] 🔧 Installing Python dependencies (attempt ${_installAttempts})...`);
     // Use --break-system-packages for Render.com and similar environments (Python 3.11+)
     await execFileAsync(pythonExec, [
       '-m', 'pip', 'install', 
       '--quiet',
       '--break-system-packages',
+      '--no-cache-dir',  // Reduce memory usage
       ...deps
     ], {
-      timeout: 120000,
+      timeout: 180000,  // 3 minutes for all deps
       env: { PATH: process.env.PATH },
     });
     _depsInstalled = true;
-    console.log('[ensurePythonDeps] ✅ deps ready');
+    console.log('[ensurePythonDeps] ✅ All Python deps installed successfully');
+    
+    // Verify PyMuPDF installation
+    try {
+      await execFileAsync(pythonExec, ['-c', 'import fitz; print("PyMuPDF version:", fitz.__version__)'], { timeout: 5000 });
+      console.log('[ensurePythonDeps] ✅ PyMuPDF verified');
+    } catch (verifyErr) {
+      console.error('[ensurePythonDeps] ⚠️ PyMuPDF verification failed');
+    }
   } catch (e) {
-    console.error('[ensurePythonDeps] install error (non-fatal):', e.message?.substring(0, 300));
-    _depsInstalled = true; // Don't retry on every request
+    console.error('[ensurePythonDeps] ⚠️ Install error:', e.message?.substring(0, 500));
+    if (_installAttempts < MAX_INSTALL_ATTEMPTS) {
+      _depsInstalled = false; // Allow retry
+    }
   }
 }
 
