@@ -2,7 +2,13 @@ services:
   - type: web
     name: docxl-ai
     runtime: node
-    buildCommand: yarn install && pip install -r requirements.txt
+    buildCommand: |
+      echo "📦 Installing Node dependencies..."
+      yarn install
+      echo "🐍 Installing Python dependencies..."
+      pip3 install --upgrade pip
+      pip3 install -r requirements.txt
+      echo "✅ Build complete"
     startCommand: yarn start
     envVars:
       - key: NODE_ENV
@@ -14,5 +20,13 @@ services:
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: NEXT_PUBLIC_RAZORPAY_KEY_ID
         sync: false
     autoDeploy: true
