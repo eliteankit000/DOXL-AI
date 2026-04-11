@@ -57,11 +57,11 @@ const apiFetch = async (url, options = {}) => {
 
 // ============= FAQ DATA =============
 const FAQ_ITEMS = [
-  { q: 'How do I convert a PDF to Excel?', a: 'Upload your PDF on DocXL AI, our AI extracts all tables and data automatically, and you can download the result as an Excel .xlsx file in seconds.' },
-  { q: 'Is DocXL AI free to use?', a: 'Yes. DocXL AI includes 5 free credits on signup. Each credit converts one PDF or image to Excel. Upgrade to Pro for 300 credits per month.' },
-  { q: 'What file types does DocXL AI support?', a: 'DocXL AI supports PDF, JPG, JPEG, and PNG files. It can extract tables from any of these formats.' },
-  { q: 'How accurate is the AI extraction?', a: 'DocXL AI uses GPT-4o, OpenAI\'s most capable model, for extraction. It achieves high accuracy on structured documents like invoices, bank statements, and data tables.' },
-  { q: 'What is the page limit per PDF?', a: 'DocXL AI processes up to 6 pages per PDF. For longer documents, split the PDF into parts and upload each separately.' },
+  { q: 'How do I convert a PDF to Excel?', a: 'Upload your PDF on Love2Excel, our AI extracts all tables and data automatically, and you can download the result as an Excel .xlsx file in seconds.' },
+  { q: 'Is Love2Excel free to use?', a: 'Yes. Love2Excel includes 5 free credits on signup. Each credit converts one PDF or image to Excel. Upgrade to Pro for 300 credits per month.' },
+  { q: 'What file types does Love2Excel support?', a: 'Love2Excel supports PDF, JPG, JPEG, and PNG files. It can extract tables from any of these formats.' },
+  { q: 'How accurate is the AI extraction?', a: 'Love2Excel uses GPT-4o, OpenAI\'s most capable model, for extraction. It achieves high accuracy on structured documents like invoices, bank statements, and data tables.' },
+  { q: 'What is the page limit per PDF?', a: 'Love2Excel processes up to 6 pages per PDF. For longer documents, split the PDF into parts and upload each separately.' },
 ];
 
 const FAQAccordion = () => {
@@ -92,11 +92,8 @@ const LandingPage = ({ onGetStarted }) => (
     <nav className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50" aria-label="Main navigation">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <Link href="/" className="flex items-center gap-2" aria-label="DocXL AI home">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <FileSpreadsheet className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold text-foreground">DocXL AI</span>
+          <Link href="/" className="flex items-center gap-2" aria-label="Love2Excel home">
+            <img src="/logo.png" alt="Love2Excel" className="h-8 w-auto" />
           </Link>
           <div className="flex items-center gap-4">
             <Link href="/pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors hidden sm:inline">Pricing</Link>
@@ -184,7 +181,7 @@ const LandingPage = ({ onGetStarted }) => (
       {/* USE CASES */}
       <section className="py-20 bg-white" aria-label="Use cases">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-center mb-12">What Can You Convert with DocXL AI?</h2>
+          <h2 className="text-3xl font-bold text-center mb-12">What Can You Convert with Love2Excel?</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
               { emoji: '📄', title: 'Invoice to Excel', desc: 'Extract line items, amounts, tax, and totals from any invoice PDF into a structured Excel file.' },
@@ -204,14 +201,14 @@ const LandingPage = ({ onGetStarted }) => (
         </div>
       </section>
 
-      {/* WHY DOCXL AI */}
+      {/* WHY LOVE2EXCEL */}
       <section className="py-20" aria-label="Features">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-center mb-12">Why Use DocXL AI to Convert PDF to Excel?</h2>
+          <h2 className="text-3xl font-bold text-center mb-12">Why Use Love2Excel to Convert PDF to Excel?</h2>
           <div className="grid sm:grid-cols-2 gap-8 max-w-4xl mx-auto">
             {[
               { icon: Zap, title: 'Instant Conversion', desc: 'No waiting. Upload your file and your Excel download is ready in under 30 seconds, even for complex tables.' },
-              { icon: Sparkles, title: 'GPT-4o Accuracy', desc: 'Unlike basic OCR tools, DocXL AI uses GPT-4o to understand context, merge split cells, and format data correctly.' },
+              { icon: Sparkles, title: 'GPT-4o Accuracy', desc: 'Unlike basic OCR tools, Love2Excel uses GPT-4o to understand context, merge split cells, and format data correctly.' },
               { icon: Shield, title: 'Secure & Private', desc: 'Your files are processed securely and never stored permanently. We delete uploaded files after extraction.' },
               { icon: CreditCard, title: 'Free to Start', desc: 'Get 5 free conversions just for signing up. No credit card. Upgrade to Pro for 300 conversions/month at $9.' },
             ].map((item, i) => (
@@ -398,10 +395,7 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <div className="flex items-center justify-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-              <FileSpreadsheet className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-2xl font-bold">DocXL AI</span>
+            <img src="/logo.png" alt="Love2Excel" className="h-10 w-auto" />
           </div>
           <Card className="shadow-xl border-0">
             <CardHeader className="text-center">
@@ -438,10 +432,7 @@ const AuthPage = ({ mode, onSwitch, onSuccess }) => {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-            <FileSpreadsheet className="w-6 h-6 text-white" />
-          </div>
-          <span className="text-2xl font-bold">DocXL AI</span>
+          <img src="/logo.png" alt="Love2Excel" className="h-10 w-auto" />
         </div>
         <Card className="shadow-xl border-0">
           <CardHeader className="text-center">
@@ -549,10 +540,7 @@ const Sidebar = ({ user, currentView, onNavigate, onLogout, collapsed, onToggle 
   return (
     <div className={`bg-white border-r h-screen flex flex-col transition-all duration-300 overflow-hidden flex-shrink-0 ${collapsed ? 'w-16' : 'w-64'}`}>
       <div className="p-4 flex items-center gap-2 border-b flex-shrink-0">
-        <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-          <FileSpreadsheet className="w-5 h-5 text-white" />
-        </div>
-        {!collapsed && <span className="font-bold text-lg whitespace-nowrap">DocXL AI</span>}
+        <img src="/logo.png" alt="Love2Excel" className={`${collapsed ? 'h-8 w-8 object-contain' : 'h-8'} w-auto flex-shrink-0`} />
         <button onClick={onToggle} className="ml-auto p-1 hover:bg-muted rounded flex-shrink-0"><Menu className="w-4 h-4" /></button>
       </div>
       <nav className="flex-1 p-2 space-y-1 overflow-hidden">
@@ -743,7 +731,7 @@ const UploadBox = ({ onConversionDone, disabled }) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = resultState.outputFilename || 'docxl_export.xlsx';
+      a.download = resultState.outputFilename || 'love2excel_export.xlsx';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1329,7 +1317,7 @@ const ResultView = ({ result, onBack }) => {
     
     console.log('[ResultView] Calling exportExcel...');
     try {
-      const success = await editor.exportExcel(`docxl_export_${Date.now()}.xlsx`);
+      const success = await editor.exportExcel(`love2excel_export_${Date.now()}.xlsx`);
       console.log('[ResultView] Export result:', success);
       if (!success) {
         alert('Export failed. Please check console for errors.');
@@ -1519,7 +1507,7 @@ const PricingView = ({ user, onUpgrade }) => {
     <div className="space-y-8 animate-fade-in">
       <div className="text-center">
         <h2 className="text-3xl font-bold">Upgrade Your Plan</h2>
-        <p className="text-muted-foreground mt-2">Get more extractions with DocXL Pro</p>
+        <p className="text-muted-foreground mt-2">Get more extractions with Love2Excel Pro</p>
       </div>
       <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
         <Card className={`border-2 ${user?.plan === 'free' ? 'border-primary/30' : ''}`}>
@@ -1742,7 +1730,7 @@ const App = () => {
         amount,
         currency,
         order_id: orderId,
-        name: 'DocXL AI',
+        name: 'Love2Excel',
         description: 'Pro Plan — 300 extractions/month',
         prefill: { email: user?.email || '' },
         theme: { color: '#1D4ED8' },
@@ -1771,7 +1759,7 @@ const App = () => {
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading DocXL AI...</p>
+          <p className="text-muted-foreground">Loading Love2Excel...</p>
         </div>
       </div>
     );

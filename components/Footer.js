@@ -10,11 +10,8 @@ const Footer = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           {/* Column 1 - Brand */}
           <div className="space-y-4">
-            <Link href="/" className="flex items-center gap-2" aria-label="DocXL AI home">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <FileSpreadsheet className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-lg font-bold text-foreground">DocXL AI</span>
+            <Link href="/" className="flex items-center gap-2" aria-label="Love2Excel home">
+              <img src="/logo.png" alt="Love2Excel" className="h-8 w-auto max-w-[160px]" />
             </Link>
             <p className="text-sm text-muted-foreground leading-relaxed">
               AI-powered PDF to Excel converter. Fast, secure, and accurate.
@@ -49,19 +46,19 @@ const Footer = () => {
             <ul className="space-y-3">
               <li>
                 <address className="not-italic">
-                  <a href="mailto:hello@docxlai.com" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
-                    <Mail className="w-4 h-4" /> hello@docxlai.com
+                  <a href="mailto:hello@love2excel.com" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
+                    <Mail className="w-4 h-4" /> hello@love2excel.com
                   </a>
                 </address>
               </li>
               <li>
-                <a href="https://twitter.com/docxlai" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
-                  <Twitter className="w-4 h-4" /> @docxlai
+                <a href="https://twitter.com/love2excelai" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
+                  <Twitter className="w-4 h-4" /> @love2excelai
                 </a>
               </li>
               <li>
-                <a href="https://linkedin.com/company/docxlai" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
-                  <Linkedin className="w-4 h-4" /> DocXL AI
+                <a href="https://linkedin.com/company/love2excelai" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-2">
+                  <Linkedin className="w-4 h-4" /> Love2Excel
                 </a>
               </li>
             </ul>
@@ -91,7 +88,7 @@ const Footer = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col md:flex-row items-center justify-between gap-3">
             <p className="text-xs text-gray-400 text-center md:text-left">
-              &copy; 2025 DocXL AI. All rights reserved.
+              &copy; 2025 Love2Excel. All rights reserved.
             </p>
             <div className="flex items-center gap-4 flex-shrink-0">
               <Link href="/privacy" className="text-xs text-gray-400 hover:text-white transition-colors">Privacy Policy</Link>

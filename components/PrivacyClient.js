@@ -42,7 +42,7 @@ export default function PrivacyClient() {
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold text-foreground">DocXL AI</span>
+              <span className="text-xl font-bold text-foreground">Love2Excel</span>
             </Link>
             <Link href="/">
               <Button variant="outline" size="sm">
@@ -85,10 +85,10 @@ export default function PrivacyClient() {
           <section id="introduction">
             <h2 className="text-2xl font-bold mb-4 pl-4 border-l-4 border-primary">1. Introduction</h2>
             <p className="mb-4">
-              DocXL AI is a software-as-a-service platform operated from India that enables users to convert PDFs, images, invoices, bank statements, and other financial documents into structured, downloadable Excel data using artificial intelligence. This Privacy Policy describes how we collect, use, store, protect, and share your personal information when you access or use the DocXL AI platform, including our website, application, APIs, and any related services.
+              Love2Excel is a software-as-a-service platform operated from India that enables users to convert PDFs, images, invoices, bank statements, and other financial documents into structured, downloadable Excel data using artificial intelligence. This Privacy Policy describes how we collect, use, store, protect, and share your personal information when you access or use the Love2Excel platform, including our website, application, APIs, and any related services.
             </p>
             <p>
-              This policy applies to all users of DocXL AI, including registered users, visitors, and anyone who interacts with our services. By accessing or using DocXL AI, you acknowledge that you have read and understood this Privacy Policy and consent to the collection and use of your information as described herein. If you do not agree with any part of this policy, please discontinue use of the service immediately.
+              This policy applies to all users of Love2Excel, including registered users, visitors, and anyone who interacts with our services. By accessing or using Love2Excel, you acknowledge that you have read and understood this Privacy Policy and consent to the collection and use of your information as described herein. If you do not agree with any part of this policy, please discontinue use of the service immediately.
             </p>
           </section>
 
@@ -108,7 +108,7 @@ export default function PrivacyClient() {
               <strong>Usage Data:</strong> We automatically collect certain technical information when you use our service, including pages visited, features used, timestamps of actions, your IP address, browser type and version, device type, operating system, and referring URLs. This data helps us improve the service and ensure security.
             </p>
             <p className="mb-4">
-              <strong>Payment Information:</strong> If you subscribe to DocXL AI Pro, your payment is processed securely by Razorpay, our third-party payment processor. DocXL AI does not store, collect, or have access to your credit card numbers, CVV codes, bank account details, or any sensitive financial payment information. All payment data is handled exclusively by Razorpay in accordance with PCI-DSS compliance standards.
+              <strong>Payment Information:</strong> If you subscribe to Love2Excel Pro, your payment is processed securely by Razorpay, our third-party payment processor. Love2Excel does not store, collect, or have access to your credit card numbers, CVV codes, bank account details, or any sensitive financial payment information. All payment data is handled exclusively by Razorpay in accordance with PCI-DSS compliance standards.
             </p>
             <p>
               <strong>Communications:</strong> If you contact our support team via email or through the contact form on our website, we collect your name, email address, the subject of your inquiry, and the content of your message to provide assistance and improve our service.
@@ -119,7 +119,7 @@ export default function PrivacyClient() {
           <section id="how-we-use">
             <h2 className="text-2xl font-bold mb-4 pl-4 border-l-4 border-primary">3. How We Use Your Information</h2>
             <p className="mb-4">
-              We use the information we collect to provide, maintain, and improve the DocXL AI document extraction service. Specifically, your data is used to authenticate your account and maintain session security, to process your uploaded documents and extract structured data using our AI models, and to deliver the extracted results to your dashboard for review and download.
+              We use the information we collect to provide, maintain, and improve the Love2Excel document extraction service. Specifically, your data is used to authenticate your account and maintain session security, to process your uploaded documents and extract structured data using our AI models, and to deliver the extracted results to your dashboard for review and download.
             </p>
             <p className="mb-4">
               We process payment information through Razorpay to manage your subscription, process payments, and maintain billing records. Transactional emails, including receipt confirmations, processing notifications, and account-related communications, are sent to keep you informed about your account activity.
@@ -128,7 +128,7 @@ export default function PrivacyClient() {
               To improve AI extraction accuracy, we may analyze anonymized and aggregated usage patterns. No individual documents are used for model training without your explicit, informed consent. We use technical data to detect and prevent fraud, abuse, unauthorized access, and other security threats to our platform and users.
             </p>
             <p>
-              DocXL AI operates in compliance with applicable Indian laws, including the Information Technology Act 2000 and the Information Technology (Amendment) Act 2008, and we may use your information as necessary to fulfill our legal obligations under these and other applicable regulations.
+              Love2Excel operates in compliance with applicable Indian laws, including the Information Technology Act 2000 and the Information Technology (Amendment) Act 2008, and we may use your information as necessary to fulfill our legal obligations under these and other applicable regulations.
             </p>
           </section>
 
@@ -145,7 +145,7 @@ export default function PrivacyClient() {
               The extracted structured data (rows, tables, and summaries) derived from your documents is retained in your account indefinitely until you choose to delete it. You have full control over your extracted data and may delete any file and its associated extracted results at any time from your dashboard.
             </p>
             <p>
-              DocXL AI employees do not manually read, review, or access your uploaded documents under any circumstances, except when explicitly required to resolve a technical support issue and only with your prior, express consent.
+              Love2Excel employees do not manually read, review, or access your uploaded documents under any circumstances, except when explicitly required to resolve a technical support issue and only with your prior, express consent.
             </p>
           </section>
 
@@ -153,7 +153,7 @@ export default function PrivacyClient() {
           <section id="data-sharing">
             <h2 className="text-2xl font-bold mb-4 pl-4 border-l-4 border-primary">5. Data Sharing and Third Parties</h2>
             <p className="mb-4">
-              DocXL AI does not sell your personal data to third parties under any circumstances. We do not allow advertisers or marketing companies to target you based on the content of your uploaded documents or extracted data.
+              Love2Excel does not sell your personal data to third parties under any circumstances. We do not allow advertisers or marketing companies to target you based on the content of your uploaded documents or extracted data.
             </p>
             <p className="mb-4">
               We share data with the following service providers only to the extent strictly necessary to deliver our service:
@@ -171,7 +171,7 @@ export default function PrivacyClient() {
               <strong>Hosting Provider:</strong> Our application infrastructure is hosted on cloud platforms that maintain strict security and privacy standards.
             </p>
             <p className="mb-4">
-              We may disclose your information if required to do so by Indian law, a court order, or a directive from a government authority with lawful jurisdiction. In the event that DocXL AI is acquired, merged with another entity, or undergoes a business transfer, your data may be transferred to the new entity under the same privacy commitments described in this policy.
+              We may disclose your information if required to do so by Indian law, a court order, or a directive from a government authority with lawful jurisdiction. In the event that Love2Excel is acquired, merged with another entity, or undergoes a business transfer, your data may be transferred to the new entity under the same privacy commitments described in this policy.
             </p>
           </section>
 
@@ -179,13 +179,13 @@ export default function PrivacyClient() {
           <section id="cookies">
             <h2 className="text-2xl font-bold mb-4 pl-4 border-l-4 border-primary">6. Cookies and Tracking</h2>
             <p className="mb-4">
-              DocXL AI uses essential cookies only. These are session authentication cookies that are strictly necessary for the login and authentication functionality of our platform to operate correctly. Without these cookies, you would not be able to maintain a logged-in session.
+              Love2Excel uses essential cookies only. These are session authentication cookies that are strictly necessary for the login and authentication functionality of our platform to operate correctly. Without these cookies, you would not be able to maintain a logged-in session.
             </p>
             <p className="mb-4">
-              We do not use advertising cookies, cross-site tracking pixels, third-party analytics services that create user profiles, or any other non-essential tracking technologies. Your browsing activity on DocXL AI is not shared with or visible to any advertising networks or data brokers.
+              We do not use advertising cookies, cross-site tracking pixels, third-party analytics services that create user profiles, or any other non-essential tracking technologies. Your browsing activity on Love2Excel is not shared with or visible to any advertising networks or data brokers.
             </p>
             <p>
-              You may disable cookies in your browser settings, however please be aware that doing so will prevent you from logging into your DocXL AI account, as our authentication system relies on session cookies to function.
+              You may disable cookies in your browser settings, however please be aware that doing so will prevent you from logging into your Love2Excel account, as our authentication system relies on session cookies to function.
             </p>
           </section>
 
@@ -202,7 +202,7 @@ export default function PrivacyClient() {
               Access to production databases and infrastructure is strictly restricted to authorized personnel only, who must authenticate using multi-factor authentication. We conduct periodic security reviews and promptly address any vulnerabilities identified.
             </p>
             <p>
-              Despite these comprehensive measures, no system connected to the internet can be guaranteed to be 100% secure. We strongly encourage you to use a strong, unique password for your DocXL AI account and to avoid reusing passwords from other services.
+              Despite these comprehensive measures, no system connected to the internet can be guaranteed to be 100% secure. We strongly encourage you to use a strong, unique password for your Love2Excel account and to avoid reusing passwords from other services.
             </p>
           </section>
 
@@ -225,7 +225,7 @@ export default function PrivacyClient() {
               You have the right to withdraw your consent to our processing of your data at any time. You may exercise this right by discontinuing your use of the service and requesting account deletion.
             </p>
             <p>
-              To exercise any of these rights, please email <a href="mailto:hello@docxlai.com" className="text-primary hover:underline">hello@docxlai.com</a> with the subject line &quot;Privacy Request &#8212; [Right Type]&quot; (e.g., &quot;Privacy Request &#8212; Deletion&quot;). We will respond to your request within 30 calendar days.
+              To exercise any of these rights, please email <a href="mailto:hello@love2excel.com" className="text-primary hover:underline">hello@love2excel.com</a> with the subject line &quot;Privacy Request &#8212; [Right Type]&quot; (e.g., &quot;Privacy Request &#8212; Deletion&quot;). We will respond to your request within 30 calendar days.
             </p>
           </section>
 
@@ -233,10 +233,10 @@ export default function PrivacyClient() {
           <section id="childrens-privacy">
             <h2 className="text-2xl font-bold mb-4 pl-4 border-l-4 border-primary">9. Children&apos;s Privacy</h2>
             <p className="mb-4">
-              DocXL AI is not intended for use by children under the age of 13. We do not knowingly collect, solicit, or store personal information from children under 13 years of age.
+              Love2Excel is not intended for use by children under the age of 13. We do not knowingly collect, solicit, or store personal information from children under 13 years of age.
             </p>
             <p>
-              If you are a parent or guardian and believe that your child has provided personal information to DocXL AI without your consent, please contact us immediately at <a href="mailto:hello@docxlai.com" className="text-primary hover:underline">hello@docxlai.com</a>. We will take prompt steps to delete the information from our systems.
+              If you are a parent or guardian and believe that your child has provided personal information to Love2Excel without your consent, please contact us immediately at <a href="mailto:hello@love2excel.com" className="text-primary hover:underline">hello@love2excel.com</a>. We will take prompt steps to delete the information from our systems.
             </p>
           </section>
 
@@ -264,10 +264,10 @@ export default function PrivacyClient() {
           <section id="international-transfers">
             <h2 className="text-2xl font-bold mb-4 pl-4 border-l-4 border-primary">11. International Data Transfers</h2>
             <p className="mb-4">
-              DocXL AI is operated from India. However, some of our third-party service providers, including Supabase and OpenAI, may process your data on servers located outside of India, including in the United States and other jurisdictions.
+              Love2Excel is operated from India. However, some of our third-party service providers, including Supabase and OpenAI, may process your data on servers located outside of India, including in the United States and other jurisdictions.
             </p>
             <p>
-              By using DocXL AI, you consent to the transfer of your information to these jurisdictions. We ensure that all third-party processors with whom we share data maintain adequate data protection standards consistent with or exceeding the requirements of applicable Indian data protection laws.
+              By using Love2Excel, you consent to the transfer of your information to these jurisdictions. We ensure that all third-party processors with whom we share data maintain adequate data protection standards consistent with or exceeding the requirements of applicable Indian data protection laws.
             </p>
           </section>
 
@@ -278,7 +278,7 @@ export default function PrivacyClient() {
               We may update this Privacy Policy from time to time to reflect changes in our practices, technology, legal requirements, or other factors. When we make material changes to this policy, we will notify registered users via email and/or display a prominent banner within the application.
             </p>
             <p>
-              Your continued use of DocXL AI after any changes to this policy constitutes your acceptance of the updated terms. The "Last updated" date at the top of this page will always reflect the date of the most recent revision. We encourage you to review this policy periodically.
+              Your continued use of Love2Excel after any changes to this policy constitutes your acceptance of the updated terms. The "Last updated" date at the top of this page will always reflect the date of the most recent revision. We encourage you to review this policy periodically.
             </p>
           </section>
 
@@ -289,9 +289,9 @@ export default function PrivacyClient() {
               If you have any questions, concerns, or requests regarding this Privacy Policy or your personal data, please contact us:
             </p>
             <ul className="list-none space-y-2 mb-4">
-              <li><strong>Privacy inquiries:</strong> <a href="mailto:hello@docxlai.com" className="text-primary hover:underline">hello@docxlai.com</a></li>
-              <li><strong>General support:</strong> <a href="mailto:hello@docxlai.com" className="text-primary hover:underline">hello@docxlai.com</a></li>
-              <li><strong>Mailing address:</strong> DocXL AI, India</li>
+              <li><strong>Privacy inquiries:</strong> <a href="mailto:hello@love2excel.com" className="text-primary hover:underline">hello@love2excel.com</a></li>
+              <li><strong>General support:</strong> <a href="mailto:hello@love2excel.com" className="text-primary hover:underline">hello@love2excel.com</a></li>
+              <li><strong>Mailing address:</strong> Love2Excel, India</li>
               <li><strong>Response time:</strong> Within 2 business days</li>
             </ul>
           </section>

@@ -210,7 +210,7 @@ const SpreadsheetEditor = ({ rows = [], onUpdate, readOnly = false }) => {
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Extracted Data');
-      XLSX.writeFile(wb, filename || `docxl_export_${Date.now()}.xlsx`);
+      XLSX.writeFile(wb, filename || `love2excel_export_${Date.now()}.xlsx`);
       return true;
     } catch (err) {
       console.error('Excel export error:', err);
@@ -232,7 +232,7 @@ const SpreadsheetEditor = ({ rows = [], onUpdate, readOnly = false }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `docxl_export_${Date.now()}.json`;
+    a.download = `love2excel_export_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, [getCurrentData]);

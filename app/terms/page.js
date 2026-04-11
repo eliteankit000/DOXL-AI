@@ -3,9 +3,9 @@ import { FileSpreadsheet, ArrowLeft } from 'lucide-react';
 import Footer from '@/components/Footer';
 
 export const metadata = {
-  title: 'Terms of Service — DocXL AI',
-  description: 'Terms of Service for DocXL AI PDF to Excel converter.',
-  alternates: { canonical: 'https://docxl.ai/terms' },
+  title: 'Terms of Service — Love2Excel',
+  description: 'Terms of Service for Love2Excel PDF to Excel converter.',
+  alternates: { canonical: 'https://love2excel.ai/terms' },
   robots: { index: true, follow: false },
 };
 
@@ -20,7 +20,7 @@ export default function TermsPage() {
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold text-foreground">DocXL AI</span>
+              <span className="text-xl font-bold text-foreground">Love2Excel</span>
             </Link>
             <Link href="/" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2">
               <ArrowLeft className="w-4 h-4 mr-2" /> Back to Home
@@ -42,7 +42,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">1. Agreement to Terms</h2>
             <p className="text-muted-foreground leading-relaxed mb-3">
-              By accessing or using DocXL AI ("Service", "Platform", "we", "us"), you agree to be bound by these Terms of Service. If you disagree with any part of these terms, you may not access the Service.
+              By accessing or using Love2Excel ("Service", "Platform", "we", "us"), you agree to be bound by these Terms of Service. If you disagree with any part of these terms, you may not access the Service.
             </p>
             <p className="text-muted-foreground leading-relaxed">
               We reserve the right to update these terms at any time. Continued use of the Service after changes constitutes acceptance of the revised terms.
@@ -53,7 +53,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">2. Service Description</h2>
             <p className="text-muted-foreground leading-relaxed mb-3">
-              DocXL AI is a SaaS platform that uses artificial intelligence to extract structured data from documents (PDFs, images, invoices, bank statements, receipts) and convert them into editable Excel spreadsheets.
+              Love2Excel is a SaaS platform that uses artificial intelligence to extract structured data from documents (PDFs, images, invoices, bank statements, receipts) and convert them into editable Excel spreadsheets.
             </p>
             <p className="text-muted-foreground leading-relaxed">
               The Service is provided "as is" and "as available" without warranties of any kind, either express or implied. We do not guarantee that the Service will be uninterrupted, secure, or error-free.
@@ -64,7 +64,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">3. Eligibility</h2>
             <p className="text-muted-foreground leading-relaxed">
-              You must be at least 18 years old to use this Service. By using DocXL AI, you represent and warrant that you meet this age requirement and have the legal capacity to enter into these Terms.
+              You must be at least 18 years old to use this Service. By using Love2Excel, you represent and warrant that you meet this age requirement and have the legal capacity to enter into these Terms.
             </p>
           </section>
 
@@ -145,7 +145,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">8. Data Ownership and Privacy</h2>
             <div className="space-y-3 text-muted-foreground leading-relaxed">
-              <p><strong>You retain full ownership</strong> of all documents and data you upload to DocXL AI.</p>
+              <p><strong>You retain full ownership</strong> of all documents and data you upload to Love2Excel.</p>
               
               <p>We commit to:</p>
               <ul className="list-disc pl-6 space-y-2">
@@ -166,7 +166,7 @@ export default function TermsPage() {
             <h2 className="text-2xl font-semibold mb-4">9. Intellectual Property Rights</h2>
             <div className="space-y-3 text-muted-foreground leading-relaxed">
               <p>
-                The Service, including all software, algorithms, design, text, graphics, and logos, is owned by DocXL AI and is protected by copyright, trademark, and other intellectual property laws.
+                The Service, including all software, algorithms, design, text, graphics, and logos, is owned by Love2Excel and is protected by copyright, trademark, and other intellectual property laws.
               </p>
               <p>
                 You are granted a limited, non-exclusive, non-transferable license to use the Service for your personal or business purposes. This license does not permit you to copy, modify, distribute, sell, or reverse engineer any part of the Service.
@@ -182,7 +182,7 @@ export default function TermsPage() {
                 <strong>To the maximum extent permitted by law:</strong>
               </p>
               <ul className="list-disc pl-6 space-y-2">
-                <li>DocXL AI and its affiliates shall not be liable for any indirect, incidental, special, consequential, or punitive damages</li>
+                <li>Love2Excel and its affiliates shall not be liable for any indirect, incidental, special, consequential, or punitive damages</li>
                 <li>Our total liability shall not exceed the amount you paid us in the last 12 months</li>
                 <li>We are not responsible for errors in AI-extracted data. Users must verify all extracted information</li>
                 <li>We are not liable for data loss, security breaches caused by third parties, or service interruptions beyond our control</li>
@@ -243,10 +243,10 @@ export default function TermsPage() {
             <div className="text-muted-foreground leading-relaxed space-y-2">
               <p>If you have questions about these Terms, please contact us:</p>
               <p>
-                <strong>Email:</strong> <a href="mailto:hello@docxlai.com" className="text-primary hover:underline">hello@docxlai.com</a>
+                <strong>Email:</strong> <a href="mailto:hello@love2excel.com" className="text-primary hover:underline">hello@love2excel.com</a>
               </p>
               <p>
-                <strong>Contact Form:</strong> <Link href="/contact" className="text-primary hover:underline">docxl.ai/contact</Link>
+                <strong>Contact Form:</strong> <Link href="/contact" className="text-primary hover:underline">love2excel.ai/contact</Link>
               </p>
             </div>
           </section>
@@ -254,7 +254,7 @@ export default function TermsPage() {
           {/* Acceptance */}
           <section className="border-t pt-8 mt-12">
             <p className="text-sm text-muted-foreground italic">
-              By creating an account and using DocXL AI, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service.
+              By creating an account and using Love2Excel, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service.
             </p>
           </section>
 

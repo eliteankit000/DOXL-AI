@@ -3,11 +3,11 @@ import { FileSpreadsheet, ArrowRight } from 'lucide-react';
 import Footer from '@/components/Footer';
 
 export const metadata = {
-  title: 'Blog — PDF to Excel Tips & Tutorials | DocXL AI',
+  title: 'Blog — PDF to Excel Tips & Tutorials | Love2Excel',
   description:
     'Learn how to convert PDFs, invoices, and bank statements to Excel. ' +
-    'Tips, tutorials, and guides from the DocXL AI team.',
-  alternates: { canonical: 'https://docxl.ai/blog' },
+    'Tips, tutorials, and guides from the Love2Excel team.',
+  alternates: { canonical: 'https://love2excel.ai/blog' },
 };
 
 const posts = [
@@ -37,11 +37,11 @@ export default function BlogPage() {
       <nav className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50" aria-label="Main navigation">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <Link href="/" className="flex items-center gap-2" aria-label="DocXL AI home">
+            <Link href="/" className="flex items-center gap-2" aria-label="Love2Excel home">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold text-foreground">DocXL AI</span>
+              <span className="text-xl font-bold text-foreground">Love2Excel</span>
             </Link>
             <div className="flex items-center gap-4">
               <Link href="/pricing" className="text-sm text-muted-foreground hover:text-foreground hidden sm:inline">Pricing</Link>

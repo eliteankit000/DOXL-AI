@@ -2,16 +2,16 @@ import { App } from '@/components/AppShell';
 import JsonLd from '@/components/JsonLd';
 
 export const metadata = {
-  title: 'Convert PDF to Excel Free Online — DocXL AI',
+  title: 'Convert PDF to Excel Free Online — Love2Excel',
   description:
     'The fastest AI-powered PDF to Excel converter. Upload invoices, ' +
     'bank statements, or any PDF table and get a clean Excel file ' +
     'instantly. Free credits included. No credit card required.',
-  alternates: { canonical: 'https://docxl.ai' },
+  alternates: { canonical: 'https://love2excel.ai' },
   openGraph: {
-    title: 'Convert PDF to Excel Free Online — DocXL AI',
+    title: 'Convert PDF to Excel Free Online — Love2Excel',
     description: 'AI-powered PDF to Excel in seconds. Try free.',
-    url: 'https://docxl.ai',
+    url: 'https://love2excel.ai',
     images: [{ url: '/og-image.png', width: 1200, height: 630 }],
   },
 };
@@ -25,23 +25,23 @@ const faqSchema = {
       name: 'How do I convert a PDF to Excel?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Upload your PDF on DocXL AI, our AI extracts all tables and data automatically, and you can download the result as an Excel .xlsx file in seconds.',
+        text: 'Upload your PDF on Love2Excel, our AI extracts all tables and data automatically, and you can download the result as an Excel .xlsx file in seconds.',
       },
     },
     {
       '@type': 'Question',
-      name: 'Is DocXL AI free?',
+      name: 'Is Love2Excel free?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Yes. DocXL AI includes 5 free credits on signup. Each credit converts one PDF or image to Excel. Upgrade to Pro for 300 credits per month.',
+        text: 'Yes. Love2Excel includes 5 free credits on signup. Each credit converts one PDF or image to Excel. Upgrade to Pro for 300 credits per month.',
       },
     },
     {
       '@type': 'Question',
-      name: 'What file types does DocXL AI support?',
+      name: 'What file types does Love2Excel support?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'DocXL AI supports PDF, JPG, JPEG, and PNG files. It can extract tables from any of these formats.',
+        text: 'Love2Excel supports PDF, JPG, JPEG, and PNG files. It can extract tables from any of these formats.',
       },
     },
     {
@@ -49,7 +49,7 @@ const faqSchema = {
       name: 'How accurate is the AI extraction?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: "DocXL AI uses GPT-4o, OpenAI's most capable model, for extraction. It achieves high accuracy on structured documents like invoices, bank statements, and data tables.",
+        text: "Love2Excel uses GPT-4o, OpenAI's most capable model, for extraction. It achieves high accuracy on structured documents like invoices, bank statements, and data tables.",
       },
     },
     {
@@ -57,7 +57,7 @@ const faqSchema = {
       name: 'What is the page limit per PDF?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'DocXL AI processes up to 6 pages per PDF. For longer documents, split the PDF into parts and upload each separately.',
+        text: 'Love2Excel processes up to 6 pages per PDF. For longer documents, split the PDF into parts and upload each separately.',
       },
     },
   ],
@@ -66,7 +66,7 @@ const faqSchema = {
 const howToSchema = {
   '@context': 'https://schema.org',
   '@type': 'HowTo',
-  name: 'How to Convert PDF to Excel Using DocXL AI',
+  name: 'How to Convert PDF to Excel Using Love2Excel',
   description: 'Convert any PDF to Excel in 3 simple steps using AI',
   step: [
     {
@@ -89,7 +89,7 @@ const howToSchema = {
     },
   ],
   totalTime: 'PT30S',
-  tool: { '@type': 'HowToTool', name: 'DocXL AI' },
+  tool: { '@type': 'HowToTool', name: 'Love2Excel' },
 };
 
 export default function Page() {

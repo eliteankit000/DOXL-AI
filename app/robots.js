@@ -28,7 +28,7 @@ export default function robots() {
         disallow: '/',
       },
     ],
-    sitemap: 'https://docxl.ai/sitemap.xml',
-    host: 'https://docxl.ai',
+    sitemap: 'https://love2excel.ai/sitemap.xml',
+    host: 'https://love2excel.ai',
   };
 }

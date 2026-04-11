@@ -199,7 +199,7 @@ const SpreadsheetEditorAG = forwardRef(({ rows = [], onUpdate, readOnly = false 
       XLSX.utils.book_append_sheet(wb, ws, 'Extracted Data');
       
       console.log('[SpreadsheetEditorAG] Writing file:', filename);
-      XLSX.writeFile(wb, filename || `docxl_export_${Date.now()}.xlsx`);
+      XLSX.writeFile(wb, filename || `love2excel_export_${Date.now()}.xlsx`);
       
       console.log('[SpreadsheetEditorAG] ✅ Export successful');
       return true;

@@ -1,5 +1,5 @@
 /*
- * DocXL AI — API Route Handler v3.0
+ * Love2Excel — API Route Handler v3.0
  * Supabase-backed, production-hardened
  *
  * ═══════════════════════════════════════════════════════════════════
@@ -144,7 +144,7 @@ async function ensurePythonDeps() {
   }
 }
 
-const TEMP_DIR = '/tmp/docxl_processing';
+const TEMP_DIR = '/tmp/love2excel_processing';
 
 export const maxDuration = 300;
 export const runtime = 'nodejs';
@@ -309,7 +309,7 @@ async function handleGeoDetect(request) {
       try {
         // Use free IP geolocation API
         const geoRes = await fetch(`https://ipapi.co/${ip}/json/`, {
-          headers: { 'User-Agent': 'DocXL-AI/1.0' },
+          headers: { 'User-Agent': 'Love2Excel-AI/1.0' },
           signal: AbortSignal.timeout(3000),
         });
         if (geoRes.ok) {
@@ -538,9 +538,9 @@ async function handleForgotPassword(request) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          sender: { name: 'DocXL AI', email: 'hello@docxlai.com' },
+          sender: { name: 'Love2Excel', email: 'hello@love2excel.com' },
           to: [{ email: email.toLowerCase() }],
-          subject: 'Reset your DocXL AI password',
+          subject: 'Reset your Love2Excel password',
           htmlContent: `<p>Click the link below to reset your password. This link expires in 1 hour.</p><p><a href="${resetLink}">Reset Password</a></p><p>If you did not request this, ignore this email.</p>`,
         }),
       });
@@ -581,7 +581,7 @@ async function handleContact(request) {
     const brevoKey = process.env.BREVO_API_KEY;
     if (!brevoKey) {
       console.error('[handleContact] BREVO_API_KEY not configured');
-      return jsonResponse({ error: 'Failed to send message. Please email us directly at hello@docxlai.com' }, 500);
+      return jsonResponse({ error: 'Failed to send message. Please email us directly at hello@love2excel.com' }, 500);
     }
 
     const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -591,10 +591,10 @@ async function handleContact(request) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        sender: { name: 'DocXL AI Contact Form', email: 'hello@docxlai.com' },
-        to: [{ email: 'hello@docxlai.com' }],
+        sender: { name: 'Love2Excel Contact Form', email: 'hello@love2excel.com' },
+        to: [{ email: 'hello@love2excel.com' }],
         replyTo: { email, name },
-        subject: 'New Contact Form Submission — DocXL AI',
+        subject: 'New Contact Form Submission — Love2Excel',
         htmlContent: `<p><strong>Name:</strong> ${name}</p><p><strong>Email:</strong> ${email}</p><p><strong>Message:</strong></p><p>${message}</p>`,
       }),
     });
@@ -1314,7 +1314,7 @@ async function handleExportExcel(request, id) {
         const { existsSync } = await import('fs');
         if (existsSync(xlsxPath)) {
           const xlsxBuffer = await readFileFs(xlsxPath);
-          const fileName = resultData.uploads.file_name?.replace(/\.[^.]+$/, '') || 'docxl_export';
+          const fileName = resultData.uploads.file_name?.replace(/\.[^.]+$/, '') || 'love2excel_export';
           console.log(`[handleExportExcel] Serving pre-generated xlsx: ${xlsxPath} (${xlsxBuffer.length} bytes)`);
           return new NextResponse(xlsxBuffer, {
             status: 200,
@@ -1612,7 +1612,7 @@ async function handleExportExcel(request, id) {
       headers: {
         ...corsHeaders(),
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="docxl_export_${Date.now()}.xlsx"`,
+        'Content-Disposition': `attachment; filename="love2excel_export_${Date.now()}.xlsx"`,
       },
     });
   } catch (error) {
@@ -1638,7 +1638,7 @@ async function handleCreateOrder(request) {
     const order = await rzp.orders.create({
       amount: 69900,
       currency: 'INR',
-      receipt: `docxl_${Date.now().toString().slice(-8)}`,
+      receipt: `love2excel_${Date.now().toString().slice(-8)}`,
     });
     return jsonResponse({
       orderId: order.id,
@@ -2000,7 +2000,7 @@ export async function GET(request, context) {
   const routePath = pathSegments.join('/');
 
   if (routePath === '' || routePath === 'health') {
-    return jsonResponse({ status: 'ok', service: 'DocXL AI API', backend: 'supabase' });
+    return jsonResponse({ status: 'ok', service: 'Love2Excel API', backend: 'supabase' });
   }
   if (routePath === 'geo') return handleGeoDetect(request);
   if (routePath === 'auth/me') return handleGetMe(request);

@@ -43,11 +43,11 @@ export default function PricingContent() {
       <nav className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50" aria-label="Main navigation">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <Link href="/" className="flex items-center gap-2" aria-label="DocXL AI home">
+            <Link href="/" className="flex items-center gap-2" aria-label="Love2Excel home">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold text-foreground">DocXL AI</span>
+              <span className="text-xl font-bold text-foreground">Love2Excel</span>
             </Link>
             <div className="flex items-center gap-4">
               <Link href="/blog" className="text-sm text-muted-foreground hover:text-foreground hidden sm:inline">Blog</Link>
@@ -61,7 +61,7 @@ export default function PricingContent() {
       <main role="main">
         <section className="py-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h1 className="text-4xl font-bold text-center mb-4">DocXL AI Pricing — PDF to Excel Converter Plans</h1>
+            <h1 className="text-4xl font-bold text-center mb-4">Love2Excel Pricing — PDF to Excel Converter Plans</h1>
             <p className="text-muted-foreground text-center mb-12 max-w-xl mx-auto">Start free. Upgrade when you need more conversions.</p>
             <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
               {/* Free */}
@@ -83,7 +83,7 @@ export default function PricingContent() {
                 {!isIndian && <p className="text-sm text-muted-foreground">or ₹699/month for India</p>}
                 {isIndian && <p className="text-sm text-muted-foreground">or $9/month (international)</p>}
                 <ul className="mt-6 space-y-3">
-                  {['300 conversions per month', 'Everything in Free', 'Up to 6 pages per PDF', 'Priority processing', 'Email support at hello@docxlai.com', 'Cancel anytime'].map((f, i) => (
+                  {['300 conversions per month', 'Everything in Free', 'Up to 6 pages per PDF', 'Priority processing', 'Email support at hello@love2excel.com', 'Cancel anytime'].map((f, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm"><Check className="w-4 h-4 text-green-500" />{f}</li>
                   ))}
                 </ul>

@@ -5,13 +5,13 @@ import JsonLd from '@/components/JsonLd';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata = {
-  metadataBase: new URL('https://docxl.ai'),
+  metadataBase: new URL('https://love2excel.ai'),
   title: {
-    default: 'DocXL AI — Convert PDF to Excel Free Online',
-    template: '%s | DocXL AI',
+    default: 'Love2Excel — Convert PDF to Excel Free Online',
+    template: '%s | Love2Excel',
   },
   description:
-    'DocXL AI converts PDFs, invoices, bank statements, and images to ' +
+    'Love2Excel converts PDFs, invoices, bank statements, and images to ' +
     'editable Excel spreadsheets in seconds using GPT-4o AI. Free to try. ' +
     'No signup required for first conversion.',
   keywords: [
@@ -29,11 +29,11 @@ export const metadata = {
     'pdf to xlsx',
     'ocr to excel',
     'gpt4 pdf converter',
-    'docxl ai',
+    'love2excel',
   ],
-  authors: [{ name: 'DocXL AI', url: 'https://docxl.ai' }],
-  creator: 'DocXL AI',
-  publisher: 'DocXL AI',
+  authors: [{ name: 'Love2Excel', url: 'https://love2excel.ai' }],
+  creator: 'Love2Excel',
+  publisher: 'Love2Excel',
   category: 'Productivity',
   classification: 'Business/Productivity',
   robots: {
@@ -50,14 +50,14 @@ export const metadata = {
     },
   },
   alternates: {
-    canonical: 'https://docxl.ai',
+    canonical: 'https://love2excel.ai',
   },
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://docxl.ai',
-    siteName: 'DocXL AI',
-    title: 'DocXL AI — Convert PDF to Excel Free Online Using AI',
+    url: 'https://love2excel.ai',
+    siteName: 'Love2Excel',
+    title: 'Love2Excel — Convert PDF to Excel Free Online Using AI',
     description:
       'Upload any PDF, invoice, or image and get a perfectly formatted ' +
       'Excel file in seconds. Powered by GPT-4o. Try free today.',
@@ -66,16 +66,16 @@ export const metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'DocXL AI — PDF to Excel Converter powered by GPT-4o',
+        alt: 'Love2Excel — PDF to Excel Converter powered by GPT-4o',
         type: 'image/png',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    site: '@docxlai',
-    creator: '@docxlai',
-    title: 'DocXL AI — Convert PDF to Excel Free Online Using AI',
+    site: '@love2excel',
+    creator: '@love2excel',
+    title: 'Love2Excel — Convert PDF to Excel Free Online Using AI',
     description:
       'Upload any PDF, invoice, or image and get a perfectly formatted ' +
       'Excel file in seconds. Powered by GPT-4o.',
@@ -98,16 +98,16 @@ export const metadata = {
     shortcut: '/favicon.ico',
   },
   other: {
-    'application-name': 'DocXL AI',
+    'application-name': 'Love2Excel',
   },
 };
 
 const webAppSchema = {
   '@context': 'https://schema.org',
   '@type': 'WebApplication',
-  name: 'DocXL AI',
-  url: 'https://docxl.ai',
-  logo: 'https://docxl.ai/logo.png',
+  name: 'Love2Excel',
+  url: 'https://love2excel.ai',
+  logo: 'https://love2excel.ai/logo.png',
   description: 'AI-powered PDF to Excel converter using GPT-4o',
   applicationCategory: 'BusinessApplication',
   operatingSystem: 'Web',
@@ -139,11 +139,11 @@ const webAppSchema = {
     'GPT-4o powered accuracy',
     'Instant download',
   ],
-  screenshot: 'https://docxl.ai/og-image.png',
+  screenshot: 'https://love2excel.ai/og-image.png',
   softwareVersion: '1.0',
   contactPoint: {
     '@type': 'ContactPoint',
-    email: 'hello@docxlai.com',
+    email: 'hello@love2excel.com',
     contactType: 'customer support',
   },
 };
@@ -151,10 +151,10 @@ const webAppSchema = {
 const orgSchema = {
   '@context': 'https://schema.org',
   '@type': 'Organization',
-  name: 'DocXL AI',
-  url: 'https://docxl.ai',
-  logo: 'https://docxl.ai/logo.png',
-  email: 'hello@docxlai.com',
+  name: 'Love2Excel',
+  url: 'https://love2excel.ai',
+  logo: 'https://love2excel.ai/logo.png',
+  email: 'hello@love2excel.com',
   sameAs: [],
 };
 

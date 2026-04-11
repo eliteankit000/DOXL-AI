@@ -1,9 +1,9 @@
 import PrivacyClient from '@/components/PrivacyClient';
 
 export const metadata = {
-  title: 'Privacy Policy — DocXL AI',
-  description: 'Privacy Policy for DocXL AI PDF to Excel converter.',
-  alternates: { canonical: 'https://docxl.ai/privacy' },
+  title: 'Privacy Policy — Love2Excel',
+  description: 'Privacy Policy for Love2Excel PDF to Excel converter.',
+  alternates: { canonical: 'https://love2excel.ai/privacy' },
   robots: { index: true, follow: false },
 };
 

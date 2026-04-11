@@ -15,7 +15,7 @@ const contactCards = [
     icon: MessageCircle,
     title: 'General Support',
     desc: 'Questions about your account, uploads, or extractions',
-    email: 'hello@docxlai.com',
+    email: 'hello@love2excel.com',
     badge: 'Avg response: 2 hours',
     color: 'bg-blue-50 text-blue-600',
   },
@@ -23,7 +23,7 @@ const contactCards = [
     icon: CreditCard,
     title: 'Billing & Payments',
     desc: 'Subscription issues, payment failures, refund requests',
-    email: 'hello@docxlai.com',
+    email: 'hello@love2excel.com',
     badge: 'Avg response: 4 hours',
     color: 'bg-green-50 text-green-600',
   },
@@ -31,7 +31,7 @@ const contactCards = [
     icon: Shield,
     title: 'Privacy & Data',
     desc: 'Data deletion requests, privacy concerns, compliance',
-    email: 'hello@docxlai.com',
+    email: 'hello@love2excel.com',
     badge: 'Avg response: 1 business day',
     color: 'bg-purple-50 text-purple-600',
   },
@@ -40,11 +40,11 @@ const contactCards = [
 const faqItems = [
   {
     q: 'How do I delete my account and all my data?',
-    a: 'You can delete your account from your dashboard settings. All your data including uploaded files, extracted results, and personal information will be permanently deleted within 24 hours. For immediate deletion, email hello@docxlai.com with subject "Account Deletion Request".',
+    a: 'You can delete your account from your dashboard settings. All your data including uploaded files, extracted results, and personal information will be permanently deleted within 24 hours. For immediate deletion, email hello@love2excel.com with subject "Account Deletion Request".',
   },
   {
     q: 'Why did my extraction fail?',
-    a: 'Common reasons: the document is blurry or low resolution (try scanning at 300 DPI+), the PDF is password-protected (remove the password first), the file contains scanned text at an angle (straighten it), or the document is in an unsupported language. Contact hello@docxlai.com with your upload ID if the issue persists.',
+    a: 'Common reasons: the document is blurry or low resolution (try scanning at 300 DPI+), the PDF is password-protected (remove the password first), the file contains scanned text at an angle (straighten it), or the document is in an unsupported language. Contact hello@love2excel.com with your upload ID if the issue persists.',
   },
   {
     q: 'Is my financial data safe?',
@@ -52,7 +52,7 @@ const faqItems = [
   },
   {
     q: 'What is your refund policy?',
-    a: 'All sales are final. We do not offer refunds for Pro plan purchases, partial month usage, or unused credits. Please review your purchase carefully before completing payment. For exceptional circumstances, contact hello@docxlai.com.',
+    a: 'All sales are final. We do not offer refunds for Pro plan purchases, partial month usage, or unused credits. Please review your purchase carefully before completing payment. For exceptional circumstances, contact hello@love2excel.com.',
   },
   {
     q: 'Do you support languages other than English?',
@@ -115,7 +115,7 @@ export default function ContactClient() {
       setSubmitted(true);
     } catch (error) {
       console.error('Form submission error:', error);
-      setErrors({ submit: 'Failed to send your message. Please email us directly at hello@docxlai.com' });
+      setErrors({ submit: 'Failed to send your message. Please email us directly at hello@love2excel.com' });
     } finally {
       setSubmitting(false);
     }
@@ -143,7 +143,7 @@ export default function ContactClient() {
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold text-foreground">DocXL AI</span>
+              <span className="text-xl font-bold text-foreground">Love2Excel</span>
             </Link>
             <Link href="/">
               <Button variant="outline" size="sm">

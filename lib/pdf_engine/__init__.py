@@ -1,5 +1,5 @@
 """
-DocXL AI - PDF Engine Package
+Love2Excel - PDF Engine Package
 Universal PDF-to-Excel conversion using pdfplumber + openpyxl
 """
 

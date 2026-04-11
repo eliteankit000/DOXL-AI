@@ -1,6 +1,6 @@
 {
-  "name": "DocXL AI \u2014 PDF to Excel Converter",
-  "short_name": "DocXL AI",
+  "name": "Love2Excel \u2014 PDF to Excel Converter",
+  "short_name": "Love2Excel",
   "description": "Convert PDFs and images to Excel instantly using AI",
   "start_url": "/",
   "display": "standalone",

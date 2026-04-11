@@ -1,5 +1,5 @@
 export default function sitemap() {
-  const baseUrl = 'https://docxl.ai';
+  const baseUrl = 'https://love2excel.ai';
   const lastModified = new Date();
   return [
     {
