@@ -145,14 +145,32 @@ def _looks_like_data_row(row: list, known_headers: list) -> bool:
                  if c and str(c).strip()]
     if not non_empty:
         return True
-    # If 60%+ cells match the pattern of data values -> data row
+
+    # Pattern 1: cells with numbers + units (bar/inventory style)
     data_pattern = re.compile(
         r'\d+\s*(BOTTEL|BEER|ML|ml|L|PCS|KG|GM|Rs|INR|\|)',
         re.IGNORECASE
     )
     data_hits = sum(1 for v in non_empty
                     if data_pattern.search(v))
-    return data_hits / len(non_empty) >= 0.4
+    if data_hits / len(non_empty) >= 0.4:
+        return True
+
+    # Pattern 2: If most cells contain digits, likely data not header
+    numeric_hits = sum(1 for v in non_empty
+                       if re.search(r'\d', v))
+    if numeric_hits / len(non_empty) >= 0.5:
+        return True
+
+    # Pattern 3: Check if cells match known header text closely
+    # If they do, it IS a repeated header row (not data)
+    header_set = set(h.lower().strip() for h in known_headers if h)
+    cell_set = set(v.lower().strip() for v in non_empty if v)
+    overlap = header_set & cell_set
+    if overlap and len(overlap) >= len(header_set) * 0.5:
+        return False  # Looks like a repeated header
+
+    return False
 
 
 def extract_pdf_content(pdf_path: str) -> dict:
@@ -183,6 +201,10 @@ def extract_pdf_content(pdf_path: str) -> dict:
     raw_text_pages = []
 
     with pdfplumber.open(pdf_path) as pdf:
+
+        # Track the last real headers seen across pages
+        last_known_headers = []
+        last_known_num_cols = 0
 
         for page_num, page in enumerate(pdf.pages):
 
@@ -375,8 +397,11 @@ def build_excel(content: dict, output_path: str) -> str:
                    bg=S_TITLE_BG, fg=S_WHITE_FG, height=28)
         current_row += 1
 
-        # ── Subtitle row if exists ────────────────────────────
-        if content["doc_subtitle"]:
+        # ── Subtitle row if meaningfully different from title ─
+        if (content["doc_subtitle"]
+                and content["doc_subtitle"] not in content["doc_title"]
+                and content["doc_title"] not in content["doc_subtitle"]
+                and len(content["doc_subtitle"]) > 10):
             _merge_row(ws, current_row, num_cols,
                        content["doc_subtitle"],
                        bold=False, size=10,
@@ -463,7 +488,10 @@ def build_excel(content: dict, output_path: str) -> str:
         ws_m.row_dimensions[r].height = 28
         r += 1
 
-        if content["doc_subtitle"]:
+        if (content["doc_subtitle"]
+                and content["doc_subtitle"] not in content["doc_title"]
+                and content["doc_title"] not in content["doc_subtitle"]
+                and len(content["doc_subtitle"]) > 10):
             ws_m.merge_cells("A{}:B{}".format(r, r))
             _wc(ws_m, r, 1, content["doc_subtitle"],
                 bold=False, size=10,

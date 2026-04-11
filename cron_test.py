@@ -9,7 +9,7 @@ import json
 import os
 
 # Configuration
-BASE_URL = "https://pdf-excel-converter-14.preview.emergentagent.com/api"
+BASE_URL = "https://column-header-fix.preview.emergentagent.com/api"
 CRON_SECRET = "docxl_cron_2024_secure_9k3m2p1x"  # From previous tests
 
 class CronTester:
