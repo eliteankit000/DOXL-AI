@@ -1,98 +1,151 @@
 """
-DocXL AI - Main Pipeline Orchestrator
-Production-grade PDF-to-Excel conversion (NO LLM)
+DocXL AI — Pipeline Router
+
+Routing order:
+  1. extract_tables_geometric
+  2. extract_tables_text_alignment
+  3. extract_metadata_regex on raw pdfplumber text
+  4. Raw text dump (unreadable)
+
+Result object:
+  {
+    "tables": [pd.DataFrame, ...],
+    "metadata": dict,
+    "source": str,          # geometric | text_align | regex_fallback | unreadable
+    "success": bool
+  }
 """
-import time
-from typing import Dict
-from pathlib import Path
+import sys
+import warnings
+import logging
+from typing import Dict, Any, List
 
-from .extractor import extract_words_from_pdf
-from .segmentation import segment_document
-from .table_engine import reconstruct_table
-from .validation import validate_and_clean_table
-from .exporter import convert_to_output_format
+import pdfplumber
+import pandas as pd
 
-def process_pdf_to_excel(pdf_path: str) -> Dict:
+from .extractor import (
+    extract_tables_geometric,
+    extract_tables_text_alignment,
+    extract_metadata_regex,
+)
+
+logger = logging.getLogger(__name__)
+warnings.filterwarnings("ignore", category=UserWarning)
+
+
+def _tables_to_dataframes(raw_tables: List[List[list]]) -> List[pd.DataFrame]:
+    """Convert list-of-list tables to DataFrames (first row = header)."""
+    dataframes: List[pd.DataFrame] = []
+    for table in raw_tables:
+        if not table or len(table) < 2:
+            continue
+        headers = table[0]
+        data = table[1:]
+        # Deduplicate empty headers
+        seen = {}
+        unique_headers = []
+        for h in headers:
+            h = h if h else 'Column'
+            if h in seen:
+                seen[h] += 1
+                unique_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                unique_headers.append(h)
+        try:
+            df = pd.DataFrame(data, columns=unique_headers)
+            # Drop fully-empty columns
+            df = df.dropna(axis=1, how='all')
+            df = df.loc[:, ~(df == '').all()]
+            if not df.empty and len(df.columns) >= 1:
+                dataframes.append(df)
+        except Exception:
+            continue
+    return dataframes
+
+
+def _extract_full_text(pdf_path: str) -> str:
+    """Extract full plain-text from all pages."""
+    text_parts = []
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages[:20]:  # safety limit
+                page_text = page.extract_text() or ''
+                if page_text.strip():
+                    text_parts.append(page_text)
+    except Exception:
+        pass
+    return '\n'.join(text_parts)
+
+
+def process(pdf_path: str) -> Dict[str, Any]:
     """
-    Main pipeline: PDF → Words → Blocks → Tables → Validation → Output
-    
-    Args:
-        pdf_path: Path to PDF file
-        
+    Main pipeline entry point.
+
     Returns:
         {
-            'columns': List[str],
-            'rows': List[Dict],
-            'document_type': str,
-            'confidence': float,
-            'processing_time': float
+            "tables": [pd.DataFrame, ...],
+            "metadata": dict,
+            "source": str,
+            "success": bool
         }
     """
-    start_time = time.time()
-    
-    print(f"[PIPELINE] Starting PDF processing: {pdf_path}")
-    
-    # LAYER 1: Extract words with bounding boxes
-    print("[LAYER 1] Extracting words...")
-    words = extract_words_from_pdf(pdf_path, page_limit=10)
-    print(f"[LAYER 1] Extracted {len(words)} words")
-    
-    if not words:
-        return {
-            'columns': [],
-            'rows': [],
-            'document_type': 'unknown',
-            'confidence': 0.0,
-            'processing_time': time.time() - start_time,
-            'error': 'No text extracted from PDF'
-        }
-    
-    # LAYER 2: Segment into blocks
-    print("[LAYER 2] Segmenting document...")
-    segmented = segment_document(words)
-    print(f"[LAYER 2] Found blocks: {', '.join([f'{k}={len(v)}' for k, v in segmented.items()])}")
-    
-    # Process main table (priority)
-    table_data = None
-    
-    if 'main_table' in segmented and segmented['main_table']:
-        print("[LAYER 3] Reconstructing main table...")
-        table_block = segmented['main_table'][0]  # Take first main table
-        table_data = reconstruct_table(table_block)
-    
-    elif 'tax_table' in segmented and segmented['tax_table']:
-        print("[LAYER 3] Reconstructing tax table...")
-        table_block = segmented['tax_table'][0]
-        table_data = reconstruct_table(table_block)
-    
-    else:
-        # Fallback: try all words as one block
-        print("[LAYER 3] No table detected, processing all words...")
-        table_data = reconstruct_table(words)
-    
-    if not table_data or not table_data.get('rows'):
-        return {
-            'columns': [],
-            'rows': [],
-            'document_type': 'unknown',
-            'confidence': 0.0,
-            'processing_time': time.time() - start_time,
-            'error': 'No table structure detected'
-        }
-    
-    print(f"[LAYER 3] Reconstructed {len(table_data['rows'])} rows, {table_data['column_count']} columns")
-    
-    # LAYER 4: Validate and clean
-    print("[LAYER 4] Validating and cleaning...")
-    table_data = validate_and_clean_table(table_data)
-    print(f"[LAYER 4] After cleaning: {len(table_data['rows'])} rows")
-    
-    # LAYER 5: Convert to output format
-    print("[LAYER 5] Converting to output format...")
-    output = convert_to_output_format(table_data)
-    output['processing_time'] = time.time() - start_time
-    
-    print(f"[PIPELINE] Complete in {output['processing_time']:.2f}s")
-    print(f"[PIPELINE] Output: {len(output['rows'])} rows, {len(output['columns'])} columns")
-    
-    return output
+    result: Dict[str, Any] = {
+        "tables": [],
+        "metadata": {},
+        "source": "unreadable",
+        "success": False,
+    }
+
+    # ── STRATEGY 1: Geometric (ruled lines) ──────────────────
+    print("[pipeline] Trying geometric strategy...", file=sys.stderr)
+    raw = extract_tables_geometric(pdf_path)
+    if raw:
+        dfs = _tables_to_dataframes(raw)
+        if dfs:
+            result["tables"] = dfs
+            result["source"] = "geometric"
+            result["success"] = True
+            print(f"[pipeline] Geometric: {len(dfs)} table(s)", file=sys.stderr)
+            return result
+
+    # ── STRATEGY 2: Text alignment ───────────────────────────
+    print("[pipeline] Trying text-alignment strategy...", file=sys.stderr)
+    raw = extract_tables_text_alignment(pdf_path)
+    if raw:
+        dfs = _tables_to_dataframes(raw)
+        if dfs:
+            result["tables"] = dfs
+            result["source"] = "text_align"
+            result["success"] = True
+            print(f"[pipeline] Text-align: {len(dfs)} table(s)", file=sys.stderr)
+            return result
+
+    # ── STRATEGY 3: Regex metadata from full text ────────────
+    print("[pipeline] Trying regex fallback...", file=sys.stderr)
+    full_text = _extract_full_text(pdf_path)
+    if full_text.strip():
+        metadata = extract_metadata_regex(full_text)
+        if metadata:
+            result["metadata"] = metadata
+            result["source"] = "regex_fallback"
+            result["success"] = True
+            print(f"[pipeline] Regex: {len(metadata)} fields", file=sys.stderr)
+            return result
+
+    # ── STRATEGY 4: Raw text dump ────────────────────────────
+    if full_text.strip():
+        # Build a single-column DataFrame from lines
+        lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+        if lines:
+            df = pd.DataFrame({"Content": lines})
+            result["tables"] = [df]
+            result["source"] = "unreadable"
+            result["success"] = True
+            logger.warning("All strategies failed for %s — returning raw text.", pdf_path)
+            print(f"[pipeline] WARNING: Raw text dump ({len(lines)} lines) for {pdf_path}", file=sys.stderr)
+            return result
+
+    logger.warning("Completely unreadable: %s", pdf_path)
+    print(f"[pipeline] WARNING: Completely unreadable: {pdf_path}", file=sys.stderr)
+    return result

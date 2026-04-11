@@ -15,9 +15,8 @@ import asyncio
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 
-from pdf_engine.universal_pipeline import process_document_universal
-from pdf_engine.exporter import export_to_excel_buffer
-from pdf_engine.ai_engine import enhance_document
+from pdf_engine.pipeline import process
+from pdf_engine.excel_builder import build_excel
 
 app = FastAPI(
     title="DocXL AI - Production PDF/Image to Excel API",

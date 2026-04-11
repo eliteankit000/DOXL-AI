@@ -594,73 +594,324 @@ const Sidebar = ({ user, currentView, onNavigate, onLogout, collapsed, onToggle 
   );
 };
 
-// ============= UPLOAD BOX =============
-const UploadBox = ({ onUploadComplete, disabled }) => {
+// ============= UPLOAD BOX (Full-Flow: Choose → Convert → Download) =============
+const STEP_LABELS = ['Choose a file', 'Convert in a click', 'Download your Excel'];
+
+const StepsBar = ({ activeStep }) => (
+  <div className="bg-muted/40 rounded-xl px-6 py-4 mb-6">
+    <div className="flex items-center justify-between max-w-lg mx-auto">
+      {STEP_LABELS.map((label, i) => {
+        const stepNum = i + 1;
+        const isActive = stepNum === activeStep;
+        const isDone = stepNum < activeStep;
+        return (
+          <div key={i} className="flex items-center gap-2">
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors
+              ${isDone ? 'bg-green-500 text-white' : isActive ? 'bg-primary text-white' : 'bg-muted-foreground/20 text-muted-foreground'}`}>
+              {isDone ? <Check className="w-4 h-4" /> : stepNum}
+            </div>
+            <span className={`text-sm font-medium hidden sm:inline ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{label}</span>
+            {i < STEP_LABELS.length - 1 && <div className="w-8 sm:w-16 h-px bg-border mx-1" />}
+          </div>
+        );
+      })}
+    </div>
+  </div>
+);
+
+const formatFileSize = (bytes) => {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
+
+const UploadBox = ({ onConversionDone, disabled }) => {
   const [dragActive, setDragActive] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [phase, setPhase] = useState('idle'); // idle | uploading | processing | success | error
   const [error, setError] = useState('');
+  const [resultState, setResultState] = useState(null);
   const inputRef = useRef(null);
 
-  const handleFile = async (file) => {
+  const activeStep = phase === 'idle' ? 1
+    : phase === 'uploading' || phase === 'processing' ? 2
+    : phase === 'success' ? 3
+    : 1;
+
+  // Select a file (does NOT upload yet)
+  const handleSelect = (file) => {
     if (!file) return;
-    const validExts = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
+    const validExts = ['.pdf'];
     const ext = '.' + file.name.split('.').pop().toLowerCase();
-    if (!validExts.includes(ext)) { setError('Invalid file type. Supported: PDF, JPG, PNG, WEBP'); return; }
-    if (file.size > 100 * 1024 * 1024) { setError('File too large. Maximum 100MB.'); return; }
+    if (!validExts.includes(ext)) { setError('Unsupported format. Only PDF files are supported.'); return; }
+    if (file.size > 50 * 1024 * 1024) { setError('File too large. Maximum size allowed is 50 MB.'); return; }
     setError('');
-    setUploading(true);
-    setUploadProgress(30);
+    setSelectedFile(file);
+    setResultState(null);
+    setPhase('idle');
+  };
+
+  const clearFile = () => {
+    setSelectedFile(null);
+    setError('');
+    setResultState(null);
+    setPhase('idle');
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  // Upload + Process in one go
+  const handleConvert = async () => {
+    if (!selectedFile) return;
+
+    setError('');
+    setPhase('uploading');
+
     try {
+      // Step 1: Upload
       const formData = new FormData();
-      formData.append('file', file);
-      const res = await apiFetch('/upload', { method: 'POST', body: formData });
-      setUploadProgress(80);
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Upload failed'); return; }
-      setUploadProgress(100);
-      setTimeout(() => onUploadComplete(data.upload), 500);
+      formData.append('file', selectedFile);
+      const uploadRes = await apiFetch('/upload', { method: 'POST', body: formData });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) { setError(uploadData.error || 'Upload failed'); setPhase('error'); return; }
+
+      const upload = uploadData.upload;
+      setPhase('processing');
+
+      // Step 2: Process
+      const processRes = await apiFetch('/process', {
+        method: 'POST',
+        body: JSON.stringify({ upload_id: upload.id, user_requirements: '' }),
+      });
+      const processData = await processRes.json();
+
+      if (processData.result) {
+        const r = processData.result;
+        const outputName = selectedFile.name.replace(/\.[^.]+$/, '') + '.xlsx';
+        setResultState({
+          visible: true,
+          filename: selectedFile.name,
+          outputFilename: outputName,
+          resultId: r.id || r.upload_id || upload.id,
+          uploadId: upload.id,
+          status: 'success',
+          totalRows: r.summary?.total_rows || r.rows?.length || 0,
+          totalCols: r.summary?.total_columns || r.columns?.length || 0,
+        });
+        setPhase('success');
+        if (onConversionDone) onConversionDone();
+        return;
+      }
+
+      if (!processRes.ok) {
+        setResultState({
+          visible: true,
+          filename: selectedFile.name,
+          status: 'error',
+          errorMessage: processData.error || 'Processing failed. Please try again.',
+        });
+        setPhase('error');
+        if (onConversionDone) onConversionDone();
+        return;
+      }
+
+      // Fallback
+      setResultState({
+        visible: true,
+        filename: selectedFile.name,
+        status: 'error',
+        errorMessage: 'No result returned. The document may be empty or unsupported.',
+      });
+      setPhase('error');
+
     } catch (err) {
-      setError('Upload failed. Please try again.');
-    } finally {
-      setTimeout(() => { setUploading(false); setUploadProgress(0); }, 1000);
+      setResultState({
+        visible: true,
+        filename: selectedFile.name,
+        status: 'error',
+        errorMessage: 'Network error. Please check your connection and try again.',
+      });
+      setPhase('error');
     }
   };
 
+  const handleDownload = async () => {
+    if (!resultState?.resultId) return;
+    try {
+      const res = await apiFetch(`/export/excel/${resultState.resultId}`);
+      if (!res.ok) { alert('Download failed. Please try again.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = resultState.outputFilename || 'docxl_export.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Download failed: ' + err.message);
+    }
+  };
+
+  const handleRetry = () => {
+    setResultState(null);
+    setPhase('idle');
+    setError('');
+    // Keep selected file so user can retry
+  };
+
+  const isConverting = phase === 'uploading' || phase === 'processing';
+
   return (
-    <Card className="border-2 border-dashed hover:border-primary/50 transition-colors">
-      <CardContent className="pt-6">
-        <div className={`flex flex-col items-center justify-center py-10 px-6 rounded-xl cursor-pointer transition-colors
-            ${dragActive ? 'bg-primary/5 border-primary' : 'hover:bg-muted/50'}
-            ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
-          onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-          onDragLeave={() => setDragActive(false)}
-          onDrop={(e) => { e.preventDefault(); setDragActive(false); handleFile(e.dataTransfer.files[0]); }}
-          onClick={() => inputRef.current?.click()}>
-          <input ref={inputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => handleFile(e.target.files?.[0])} />
-          {uploading ? (
-            <div className="w-full max-w-xs space-y-4">
-              <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto" />
-              <p className="text-sm text-center font-medium">Uploading...</p>
-              <Progress value={uploadProgress} className="h-2" />
+    <div className="space-y-4">
+      {/* Steps Bar */}
+      <StepsBar activeStep={activeStep} />
+
+      {/* Drop Zone */}
+      <Card className={`transition-all ${dragActive ? 'border-primary border-solid border-2' : 'border-2 border-dashed'} ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <CardContent className="pt-6">
+          <div
+            className={`flex flex-col items-center justify-center py-10 px-6 rounded-xl transition-colors
+              ${dragActive ? 'bg-primary/5' : ''}
+              ${isConverting ? 'pointer-events-none' : 'cursor-pointer hover:bg-muted/50'}`}
+            onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={(e) => { e.preventDefault(); setDragActive(false); handleSelect(e.dataTransfer.files[0]); }}
+            onClick={() => !isConverting && inputRef.current?.click()}
+          >
+            <input ref={inputRef} type="file" className="hidden" accept=".pdf" onChange={(e) => { handleSelect(e.target.files?.[0]); if (inputRef.current) inputRef.current.value = ''; }} />
+
+            {isConverting ? (
+              <div className="w-full max-w-xs space-y-4">
+                <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto" />
+                <p className="text-sm text-center font-medium">
+                  {phase === 'uploading' ? 'Uploading...' : 'Converting your document...'}
+                </p>
+                <Progress value={phase === 'uploading' ? 40 : 75} className="h-2" />
+              </div>
+            ) : (
+              <>
+                <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
+                  <Upload className="w-8 h-8 text-primary" />
+                </div>
+                <p className="text-lg font-medium mb-1">Drop your file here or</p>
+                <Button variant="outline" size="sm" className="mt-2 mb-4" onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>
+                  <Upload className="w-4 h-4 mr-2" /> Upload
+                </Button>
+                <p className="text-xs text-muted-foreground">Maximum size allowed is 50 MB.</p>
+                <p className="text-xs text-muted-foreground mt-1">Supported formats: <strong>PDF</strong></p>
+              </>
+            )}
+          </div>
+
+          {/* File Selected State */}
+          {selectedFile && !isConverting && phase !== 'success' && (
+            <div className="mt-4 flex items-center justify-between bg-muted/50 rounded-lg px-4 py-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText className="w-5 h-5 text-primary flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate" title={selectedFile.name}>{selectedFile.name}</p>
+                  <p className="text-xs text-muted-foreground">{formatFileSize(selectedFile.size)}</p>
+                </div>
+              </div>
+              <button onClick={(e) => { e.stopPropagation(); clearFile(); }} className="p-1 hover:bg-destructive/10 rounded" title="Remove file">
+                <X className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+              </button>
             </div>
-          ) : (
-            <>
-              <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
-                <Upload className="w-8 h-8 text-primary" />
-              </div>
-              <p className="text-lg font-medium mb-1">Drop your document here</p>
-              <p className="text-sm text-muted-foreground mb-4">or click to browse files</p>
-              <div className="flex gap-2">
-                {['PDF', 'JPG', 'PNG'].map(t => (<Badge key={t} variant="secondary" className="text-xs">{t}</Badge>))}
-              </div>
-              <p className="text-xs text-muted-foreground mt-3">Max file size: 100MB</p>
-            </>
           )}
-        </div>
-        {error && <p className="text-sm text-destructive mt-3 text-center">{error}</p>}
-      </CardContent>
-    </Card>
+
+          {/* Convert Button */}
+          {selectedFile && !isConverting && phase !== 'success' && (
+            <div className="mt-4 flex justify-center">
+              <Button onClick={(e) => { e.stopPropagation(); handleConvert(); }} disabled={disabled} size="lg">
+                <Zap className="w-4 h-4 mr-2" /> Convert to Excel
+              </Button>
+            </div>
+          )}
+
+          {/* Error message */}
+          {error && <p className="text-sm text-destructive mt-3 text-center">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {/* Result Block (Success) */}
+      {resultState?.visible && resultState.status === 'success' && (
+        <Card className="border bg-green-50/50 dark:bg-green-950/20">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                <Check className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">Conversion complete</h3>
+              </div>
+              <div className="w-full max-w-sm space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="font-medium text-muted-foreground">File name</span>
+                  <span className="truncate ml-4 max-w-[200px]" title={resultState.filename}>{resultState.filename}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-medium text-muted-foreground">Output</span>
+                  <span className="truncate ml-4 max-w-[200px]" title={resultState.outputFilename}>{resultState.outputFilename}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-muted-foreground">Status</span>
+                  <span className="flex items-center gap-1.5 text-green-600 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Success
+                  </span>
+                </div>
+                {(resultState.totalRows > 0) && (
+                  <div className="flex justify-between">
+                    <span className="font-medium text-muted-foreground">Extracted</span>
+                    <span>{resultState.totalRows} rows, {resultState.totalCols} columns</span>
+                  </div>
+                )}
+              </div>
+              <Button onClick={handleDownload} size="lg" className="mt-2">
+                <Download className="w-4 h-4 mr-2" /> Download Excel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Result Block (Error) */}
+      {resultState?.visible && resultState.status === 'error' && (
+        <Card className="border border-destructive/30 bg-red-50/50 dark:bg-red-950/20">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <X className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">Conversion failed</h3>
+              </div>
+              <div className="w-full max-w-sm space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="font-medium text-muted-foreground">File name</span>
+                  <span className="truncate ml-4 max-w-[200px]" title={resultState.filename}>{resultState.filename}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-muted-foreground">Status</span>
+                  <span className="flex items-center gap-1.5 text-red-600 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Failed
+                  </span>
+                </div>
+                {resultState.errorMessage && (
+                  <div className="flex justify-between">
+                    <span className="font-medium text-muted-foreground">Reason</span>
+                    <span className="text-muted-foreground ml-4 text-right max-w-[200px]">{resultState.errorMessage}</span>
+                  </div>
+                )}
+              </div>
+              <Button variant="outline" onClick={handleRetry} size="lg" className="mt-2">
+                <RefreshCw className="w-4 h-4 mr-2" /> Try again
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 };
 
@@ -1148,7 +1399,7 @@ const ResultView = ({ result, onBack }) => {
 };
 
 // ============= DASHBOARD VIEW =============
-const DashboardView = ({ user, onUploadComplete, uploads, onViewResult, onRefresh }) => (
+const DashboardView = ({ user, uploads, onViewResult, onRefresh, onConversionDone }) => (
   <div className="space-y-8 animate-fade-in">
     <div>
       <h1 className="text-3xl font-bold">Welcome, {user?.name || 'there'}!</h1>
@@ -1159,7 +1410,7 @@ const DashboardView = ({ user, onUploadComplete, uploads, onViewResult, onRefres
       <Card><CardContent className="pt-4 pb-4"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center"><FileSpreadsheet className="w-5 h-5 text-green-500" /></div><div><p className="text-sm text-muted-foreground">Files Processed</p><p className="text-xl font-bold">{uploads?.filter(u => u.status === 'completed' || u.status === 'partial').length || 0}</p></div></div></CardContent></Card>
       <Card><CardContent className="pt-4 pb-4"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-orange-500/10 rounded-lg flex items-center justify-center"><Zap className="w-5 h-5 text-orange-500" /></div><div><p className="text-sm text-muted-foreground">Plan</p><p className="text-xl font-bold capitalize">{user?.plan || 'free'}</p></div></div></CardContent></Card>
     </div>
-    <UploadBox onUploadComplete={onUploadComplete} disabled={(user?.credits_remaining ?? 0) <= 0} />
+    <UploadBox onConversionDone={onConversionDone} disabled={(user?.credits_remaining ?? 0) <= 0} />
     {(user?.credits_remaining ?? 0) <= 0 && (
       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
         <p className="text-orange-700 font-medium">No credits remaining. Upgrade to Pro for 300 files/month.</p>
@@ -1320,7 +1571,6 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
   const [uploads, setUploads] = useState([]);
-  const [currentUpload, setCurrentUpload] = useState(null);
   const [currentResult, setCurrentResult] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -1453,20 +1703,12 @@ const App = () => {
     setUser(null);
     setSession(null);
     setUploads([]);
-    setCurrentUpload(null);
     setCurrentResult(null);
     setView('landing');
   };
 
-  // SIMPLIFIED FLOW: Upload → Processing → Result (No PreProcess Review)
-  const handleUploadComplete = (upload) => {
-    setCurrentUpload(upload);
-    setView('processing');  // Go directly to processing
-  };
-
-  const handleProcessComplete = (result) => {
-    setCurrentResult(result);
-    setView('result');
+  // Inline flow: Upload + Process happen inside UploadBox — no view change
+  const handleConversionDone = () => {
     fetchUploads();
     refreshUser();
   };
@@ -1547,18 +1789,17 @@ const App = () => {
             <DashboardView
               user={user}
               uploads={uploads}
-              onUploadComplete={handleUploadComplete}
+              onConversionDone={handleConversionDone}
               onViewResult={handleViewResult}
               onRefresh={() => fetchUploads()}
             />
           )}
           {view === 'upload' && (
             <div className="space-y-6 animate-fade-in">
-              <h2 className="text-2xl font-bold">Upload Document</h2>
-              <UploadBox onUploadComplete={handleUploadComplete} disabled={(user?.credits_remaining ?? 0) <= 0} />
+              <h2 className="text-2xl font-bold">Convert PDF to Excel</h2>
+              <UploadBox onConversionDone={handleConversionDone} disabled={(user?.credits_remaining ?? 0) <= 0} />
             </div>
           )}
-          {view === 'processing' && <ProcessingView upload={currentUpload} onComplete={handleProcessComplete} onError={() => { fetchUploads(); setView('dashboard'); }} />}
           {view === 'result' && currentResult && <ResultView result={currentResult} onBack={() => { setView('dashboard'); fetchUploads(); }} />}
           {view === 'history' && <HistoryView uploads={uploads} onViewResult={handleViewResult} onDelete={handleDeleteUpload} onRefresh={() => fetchUploads()} />}
           {view === 'pricing' && <PricingView user={user} onUpgrade={handleUpgrade} />}

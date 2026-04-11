@@ -104,14 +104,11 @@ async function ensurePythonDeps() {
   _installAttempts++;
   const pythonExec = await getPythonPath();
   
-  // CRITICAL: PyMuPDF must be installed for table extraction
+  // CRITICAL: pdfplumber must be installed for table extraction
   const deps = [
-    'PyMuPDF',           // CORE: Fast C backend for PDF processing
-    'opencv-python-headless',  // Image processing for scanned PDFs
-    'numpy',             // Data processing
-    'scipy',             // Scientific computing
-    'scikit-learn',      // Machine learning utilities
-    'pdfplumber',        // Fallback PDF extraction
+    'pdfplumber',        // CORE: PDF table extraction
+    'openpyxl',          // Excel output
+    'pandas',            // DataFrame processing
     'python-dateutil',   // Date parsing
     'Pillow'             // Image utilities
   ];
@@ -132,12 +129,12 @@ async function ensurePythonDeps() {
     _depsInstalled = true;
     console.log('[ensurePythonDeps] ✅ All Python deps installed successfully');
     
-    // Verify PyMuPDF installation
+    // Verify pdfplumber installation
     try {
-      await execFileAsync(pythonExec, ['-c', 'import fitz; print("PyMuPDF version:", fitz.__version__)'], { timeout: 5000 });
-      console.log('[ensurePythonDeps] ✅ PyMuPDF verified');
+      await execFileAsync(pythonExec, ['-c', 'import pdfplumber; print("pdfplumber version:", pdfplumber.__version__)'], { timeout: 5000 });
+      console.log('[ensurePythonDeps] ✅ pdfplumber verified');
     } catch (verifyErr) {
-      console.error('[ensurePythonDeps] ⚠️ PyMuPDF verification failed');
+      console.error('[ensurePythonDeps] ⚠️ pdfplumber verification failed');
     }
   } catch (e) {
     console.error('[ensurePythonDeps] ⚠️ Install error:', e.message?.substring(0, 500));
@@ -640,9 +637,9 @@ async function handleUpload(request) {
       return jsonResponse({ error: 'Invalid file type. Supported: PDF, JPG, PNG, WEBP' }, 400);
     }
 
-    const maxSize = 100 * 1024 * 1024;
+    const maxSize = 50 * 1024 * 1024;
     if (file.size > maxSize) {
-      return jsonResponse({ error: 'File too large. Maximum 100MB allowed.' }, 400);
+      return jsonResponse({ error: 'File too large. Maximum 50MB allowed.' }, 400);
     }
 
     const bytes = await file.arrayBuffer();
