@@ -68,9 +68,14 @@ def _col_width(values: list, header: str) -> float:
 
 def _is_junk_row(row: list) -> bool:
     """Return True for rows that are headers/footers/noise."""
-    joined = " ".join(str(c) for c in row if c).strip().lower()
-    if not joined:
+    non_empty = [str(c).strip() for c in row
+                 if c and str(c).strip()]
+    if not non_empty:
         return True
+
+    joined = " ".join(non_empty).strip().lower()
+
+    # Existing junk patterns
     junk_patterns = [
         r"^\d{1,2}/\d{1,2}/\d{4}",   # dates alone
         r"^page\s*\d",                 # page numbers
@@ -83,10 +88,23 @@ def _is_junk_row(row: list) -> bool:
     for p in junk_patterns:
         if re.search(p, joined, re.IGNORECASE):
             return True
-    # Row where 80%+ cells are empty
-    non_empty = [c for c in row if c and str(c).strip()]
-    if len(row) > 0 and len(non_empty) / len(row) < 0.2:
+
+    # NEW: single-cell rows where the one value spans the
+    # full row width -> these are title/header text bleeds
+    if (len(non_empty) == 1
+            and len(row) >= 4
+            and len(non_empty[0]) > 25):
         return True
+
+    # NEW: rows that look like they contain a date-time stamp
+    # followed by a page number (e.g. "4/9/2026 7:29:49  1")
+    if re.match(r"\d{1,2}/\d{1,2}/\d{4}\s+\d+:\d+", joined):
+        return True
+
+    # 80%+ cells empty
+    if len(non_empty) / max(len(row), 1) < 0.2:
+        return True
+
     return False
 
 
@@ -115,21 +133,26 @@ def _find_header_row(table: list) -> int:
     return 0
 
 
-def _rows_are_same_table(prev_headers: list,
-                          curr_headers: list) -> bool:
+def _looks_like_data_row(row: list, known_headers: list) -> bool:
     """
-    Returns True if curr_headers is a repeat of prev_headers
-    (same table continuing on next page).
+    Returns True if this row looks like data, not a header.
+    A header row has text labels. A data row has values like
+    '0 BOTTEL | 00 ML', '3 BEER', numbers, or item names.
     """
-    if not prev_headers or not curr_headers:
+    if not known_headers:
         return False
-    if len(prev_headers) != len(curr_headers):
-        return False
-    matches = sum(
-        1 for a, b in zip(prev_headers, curr_headers)
-        if _clean_cell(a).lower() == _clean_cell(b).lower()
+    non_empty = [str(c).strip() for c in row
+                 if c and str(c).strip()]
+    if not non_empty:
+        return True
+    # If 60%+ cells match the pattern of data values -> data row
+    data_pattern = re.compile(
+        r'\d+\s*(BOTTEL|BEER|ML|ml|L|PCS|KG|GM|Rs|INR|\|)',
+        re.IGNORECASE
     )
-    return matches / len(prev_headers) >= 0.7
+    data_hits = sum(1 for v in non_empty
+                    if data_pattern.search(v))
+    return data_hits / len(non_empty) >= 0.4
 
 
 def extract_pdf_content(pdf_path: str) -> dict:
@@ -171,24 +194,24 @@ def extract_pdf_content(pdf_path: str) -> dict:
 
             # ── Document title from page 1 ──────────────────────
             if page_num == 0 and lines:
-                # Skip lines that are just dates, times, page nums
+                # Collect up to 3 candidate title lines
+                candidates = []
                 for line in lines:
                     if (len(line) > 8
                             and not re.match(
                                 r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}",
                                 line)
-                            and not re.match(r"^\d+$", line)):
-                        doc_title = line
+                            and not re.match(r"^\d+$", line)
+                            and not re.match(r"^\d{1,2}:\d{2}", line)):
+                        candidates.append(line)
+                    if len(candidates) == 3:
                         break
-                # Subtitle: next meaningful line after title
-                title_found = False
-                for line in lines:
-                    if line == doc_title:
-                        title_found = True
-                        continue
-                    if title_found and len(line) > 5:
-                        doc_subtitle = line
-                        break
+
+                if candidates:
+                    # Pick the LONGEST candidate as the title
+                    doc_title = max(candidates, key=len)
+                    # No subtitle — set empty to avoid double title rows
+                    doc_subtitle = ""
 
             # ── Try geometric table extraction ──────────────────
             tables_geo = page.extract_tables({
@@ -212,24 +235,49 @@ def extract_pdf_content(pdf_path: str) -> dict:
             # ── Process each table on this page ─────────────────
             for table in page_tables:
 
-                if not table or len(table) < 2:
+                if not table or len(table) < 1:
                     continue
 
-                # Find the real header row index
+                # ── Detect if this table has a header row ──────────
                 hdr_idx = _find_header_row(table)
-
-                # Clean headers
                 raw_headers = table[hdr_idx]
-                headers = [_clean_cell(h) or "Col_{}".format(i+1)
-                           for i, h in enumerate(raw_headers)]
+                candidate_headers = [
+                    _clean_cell(h) or "Col_{}".format(i+1)
+                    for i, h in enumerate(raw_headers)
+                ]
 
-                # Collect data rows
+                # ── Check if this is a continuation page ──────────
+                # Continuation = the "header" row actually looks like
+                # data AND we already have headers from a previous page
+                is_continuation = (
+                    last_known_headers
+                    and len(candidate_headers) == last_known_num_cols
+                    and _looks_like_data_row(raw_headers, last_known_headers)
+                )
+
+                if is_continuation:
+                    # Use headers from previous page
+                    headers = last_known_headers
+                    # All rows including "header" row are data
+                    start_from = 0
+                else:
+                    headers = candidate_headers
+                    start_from = hdr_idx + 1
+                    last_known_headers = headers
+                    last_known_num_cols = len(headers)
+
+                # ── Collect data rows ──────────────────────────────
                 data_rows = []
-                for row in table[hdr_idx + 1:]:
+                for row in table[start_from:]:
                     if _is_junk_row(row):
                         continue
+                    # Skip rows that look like page headers/titles
+                    non_empty_vals = [str(c).strip() for c in row
+                                     if c and str(c).strip()]
+                    if (len(non_empty_vals) == 1
+                            and len(non_empty_vals[0]) > 20):
+                        continue   # single long string = title bleed
                     clean = [_clean_cell(c) for c in row]
-                    # Pad or trim to header length
                     while len(clean) < len(headers):
                         clean.append("")
                     data_rows.append(clean[:len(headers)])
@@ -237,27 +285,12 @@ def extract_pdf_content(pdf_path: str) -> dict:
                 if not data_rows:
                     continue
 
-                # ── Check if this is continuation of previous ───
-                if (all_tables
-                        and _rows_are_same_table(
-                            all_tables[-1]["headers"], headers)):
-                    # Append rows to existing table (multi-page)
+                # ── Append to existing table if continuation ──────
+                if is_continuation and all_tables:
                     all_tables[-1]["rows"].extend(data_rows)
                 else:
-                    # Look for a heading above this table in raw text
-                    heading = ""
-                    if lines:
-                        # Use last non-junk line before table as heading
-                        for line in reversed(lines):
-                            if (len(line) > 4
-                                    and line not in headers
-                                    and not re.match(
-                                        r"^\d", line)):
-                                heading = line
-                                break
-
                     all_tables.append({
-                        "heading":    heading,
+                        "heading":    "",
                         "headers":    headers,
                         "rows":       data_rows,
                         "page_start": page_num + 1,
