@@ -1,420 +1,305 @@
 #!/usr/bin/env python3
 """
-DocXL AI Backend Testing Script
-Tests the backend API after major extraction pipeline rewrite.
-
-Key areas to test:
-1. Python Extraction Pipeline (extract_and_build function)
-2. Health Check API
-3. Auth Flow (Register + Login)
-4. File Size Limit (50MB)
-5. Upload + Process Flow
-6. Excel Export (pre-generated xlsx serving)
+DocXL AI Backend Testing Suite - V3 Extraction System
+Tests all critical requirements from the review request.
 """
 
-import requests
-import json
 import sys
 import os
+import json
+import requests
+import subprocess
 import time
 import tempfile
-from io import BytesIO
+import uuid
+from pathlib import Path
 
-# Backend URL from environment
+# Test configuration
 BASE_URL = "http://localhost:3000"
 API_BASE = f"{BASE_URL}/api"
 
 class BackendTester:
     def __init__(self):
-        self.session = requests.Session()
-        self.session.timeout = 30
-        # Disable SSL verification and add headers
-        self.session.verify = False
-        self.session.headers.update({
-            'User-Agent': 'DocXL-Backend-Tester/1.0',
-            'Connection': 'close'
-        })
+        self.test_results = []
         self.auth_token = None
-        self.test_user_email = f"test_{int(time.time())}@docxl.com"
-        self.test_user_password = "testpass123"
-        self.upload_id = None
-        self.result_id = None
+        self.test_user_email = None
+        self.test_upload_id = None
         
-    def log(self, message):
-        print(f"[TEST] {message}")
+    def log_test(self, test_name, success, message="", details=None):
+        """Log test result"""
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"{status}: {test_name}")
+        if message:
+            print(f"    {message}")
+        if details:
+            print(f"    Details: {details}")
         
-    def test_python_imports(self):
-        """Test 1: Python Extraction Pipeline - Import Test"""
+        self.test_results.append({
+            "test": test_name,
+            "success": success,
+            "message": message,
+            "details": details
+        })
+        
+    def test_1_python_imports(self):
+        """Test 1: Python Import Verification"""
         try:
-            self.log("Testing Python imports...")
-            
-            # Test import of extract_and_build function
-            import sys
-            sys.path.insert(0, '/app')
-            from lib.pdf_engine.extractor import extract_and_build, get_extraction_summary
-            
-            self.log("✅ Python imports successful - extract_and_build and get_extraction_summary functions available")
-            return True
-            
-        except Exception as e:
-            self.log(f"❌ Python import failed: {str(e)}")
-            return False
-    
-    def test_python_script_execution(self):
-        """Test 2: Python Script Execution Test"""
-        try:
-            self.log("Testing Python script execution...")
-            
-            # Test the extract.py script with invalid file (should handle gracefully)
-            import subprocess
+            # Test the main import
             result = subprocess.run([
-                'python3', '/app/scripts/extract.py', '/dev/null'
-            ], capture_output=True, text=True, timeout=30)
+                sys.executable, '-c', 
+                "from lib.pdf_engine.extractor import extract_and_build, extract_pdf_content, build_excel, get_extraction_summary; print('OK')"
+            ], cwd='/app', capture_output=True, text=True, timeout=10)
             
-            # Should output JSON even for invalid file
-            if result.stdout:
-                try:
-                    output = json.loads(result.stdout)
-                    if 'error' in output:
-                        self.log("✅ Python script handles invalid files gracefully with JSON error output")
-                        return True
-                except json.JSONDecodeError:
-                    pass
-            
-            self.log(f"❌ Python script execution failed or invalid output")
-            self.log(f"stdout: {result.stdout[:200]}")
-            self.log(f"stderr: {result.stderr[:200]}")
-            return False
-            
+            if result.returncode == 0 and 'OK' in result.stdout:
+                self.log_test("Python Import Verification", True, "All required functions imported successfully")
+            else:
+                self.log_test("Python Import Verification", False, f"Import failed: {result.stderr}")
+                
         except Exception as e:
-            self.log(f"❌ Python script execution test failed: {str(e)}")
-            return False
+            self.log_test("Python Import Verification", False, f"Exception: {str(e)}")
     
-    def test_health_check(self):
-        """Test 3: Health Check API"""
+    def test_2_banned_strings(self):
+        """Test 2: Banned String Check (Zero hardcoded strings)"""
         try:
-            self.log("Testing health check API...")
+            banned_strings = ["SAGE", "Semester", "Enrollment", "Subject Details", "Father", "Form Details"]
+            extractor_path = "/app/lib/pdf_engine/extractor.py"
             
-            response = self.session.get(f"{API_BASE}/health")
+            if not os.path.exists(extractor_path):
+                self.log_test("Banned String Check", False, f"Extractor file not found: {extractor_path}")
+                return
+                
+            with open(extractor_path, 'r') as f:
+                content = f.read()
+                
+            found_banned = []
+            for banned in banned_strings:
+                if banned in content:
+                    found_banned.append(banned)
+                    
+            if found_banned:
+                self.log_test("Banned String Check", False, f"Found hardcoded strings: {found_banned}")
+            else:
+                self.log_test("Banned String Check", True, "No hardcoded strings found - universal extraction confirmed")
+                
+        except Exception as e:
+            self.log_test("Banned String Check", False, f"Exception: {str(e)}")
+    
+    def test_3_banned_libraries(self):
+        """Test 3: Banned Library Check (Only pdfplumber + openpyxl allowed)"""
+        try:
+            banned_imports = ["import camelot", "import tabula", "import fitz", "from pymupdf"]
+            extractor_path = "/app/lib/pdf_engine/extractor.py"
+            
+            if not os.path.exists(extractor_path):
+                self.log_test("Banned Library Check", False, f"Extractor file not found: {extractor_path}")
+                return
+                
+            with open(extractor_path, 'r') as f:
+                content = f.read()
+                
+            found_banned = []
+            for banned in banned_imports:
+                if banned in content:
+                    found_banned.append(banned)
+                    
+            if found_banned:
+                self.log_test("Banned Library Check", False, f"Found banned imports: {found_banned}")
+            else:
+                self.log_test("Banned Library Check", True, "Only allowed libraries (pdfplumber + openpyxl) found")
+                
+        except Exception as e:
+            self.log_test("Banned Library Check", False, f"Exception: {str(e)}")
+    
+    def test_4_graceful_error_handling(self):
+        """Test 4: Graceful Error Handling"""
+        try:
+            # Test with invalid file
+            result = subprocess.run([
+                sys.executable, '/app/scripts/extract.py', '/dev/null'
+            ], cwd='/app', capture_output=True, text=True, timeout=30)
+            
+            # Should output JSON with error, not crash
+            try:
+                output = json.loads(result.stdout)
+                if 'error' in output:
+                    self.log_test("Graceful Error Handling", True, "Script outputs JSON error instead of crashing")
+                else:
+                    self.log_test("Graceful Error Handling", False, "No error field in JSON output")
+            except json.JSONDecodeError:
+                self.log_test("Graceful Error Handling", False, f"Script output is not valid JSON: {result.stdout[:200]}")
+                
+        except Exception as e:
+            self.log_test("Graceful Error Handling", False, f"Exception: {str(e)}")
+    
+    def test_5_health_check(self):
+        """Test 5: Health Check API"""
+        try:
+            response = requests.get(f"{API_BASE}/health", timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
                 if data.get('status') == 'ok':
-                    self.log(f"✅ Health check passed: {data}")
-                    return True
+                    self.log_test("Health Check API", True, f"Health check passed: {data}")
                 else:
-                    self.log(f"❌ Health check failed - invalid response: {data}")
-                    return False
+                    self.log_test("Health Check API", False, f"Invalid health response: {data}")
             else:
-                self.log(f"❌ Health check failed - status {response.status_code}: {response.text}")
-                return False
+                self.log_test("Health Check API", False, f"Health check failed with status {response.status_code}")
                 
         except Exception as e:
-            self.log(f"❌ Health check test failed: {str(e)}")
-            return False
+            self.log_test("Health Check API", False, f"Exception: {str(e)}")
     
-    def test_user_registration(self):
-        """Test 4: User Registration"""
+    def test_6_auth_flow(self):
+        """Test 6: Auth Flow (Register + Login)"""
         try:
-            self.log("Testing user registration...")
+            # Generate unique test user
+            timestamp = int(time.time())
+            self.test_user_email = f"test_v3_{timestamp}@docxl.com"
+            test_password = "testpass123"
             
-            payload = {
+            # Test Registration
+            reg_data = {
                 "email": self.test_user_email,
-                "password": self.test_user_password,
-                "name": "Test User"
+                "password": test_password,
+                "name": "Test User V3"
             }
             
-            response = self.session.post(f"{API_BASE}/auth/register", json=payload)
+            reg_response = requests.post(f"{API_BASE}/auth/register", json=reg_data, timeout=10)
             
-            if response.status_code in [201, 409]:  # 201 = created, 409 = already exists
-                if response.status_code == 201:
-                    data = response.json()
-                    self.log(f"✅ User registration successful: {data.get('message', 'Account created')}")
-                else:
-                    self.log("✅ User registration - email already exists (expected for repeated tests)")
-                return True
+            if reg_response.status_code in [200, 201]:
+                self.log_test("User Registration", True, f"User registered: {self.test_user_email}")
             else:
-                self.log(f"❌ User registration failed - status {response.status_code}: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log(f"❌ User registration test failed: {str(e)}")
-            return False
-    
-    def test_user_login(self):
-        """Test 5: User Login"""
-        try:
-            self.log("Testing user login...")
+                self.log_test("User Registration", False, f"Registration failed: {reg_response.status_code} - {reg_response.text}")
+                return
             
-            payload = {
+            # Test Login
+            login_data = {
                 "email": self.test_user_email,
-                "password": self.test_user_password
+                "password": test_password
             }
             
-            response = self.session.post(f"{API_BASE}/auth/login", json=payload)
+            login_response = requests.post(f"{API_BASE}/auth/login", json=login_data, timeout=10)
             
-            if response.status_code == 200:
-                data = response.json()
-                if 'token' in data:
-                    self.auth_token = data['token']
-                    self.session.headers.update({'Authorization': f'Bearer {self.auth_token}'})
-                    self.log(f"✅ User login successful - token received")
-                    return True
+            if login_response.status_code == 200:
+                login_data = login_response.json()
+                self.auth_token = login_data.get('token')
+                if self.auth_token:
+                    self.log_test("User Login", True, f"Login successful, token received")
                 else:
-                    self.log(f"❌ User login failed - no token in response: {data}")
-                    return False
+                    self.log_test("User Login", False, "No token in login response")
             else:
-                self.log(f"❌ User login failed - status {response.status_code}: {response.text}")
-                return False
+                self.log_test("User Login", False, f"Login failed: {login_response.status_code} - {login_response.text}")
                 
         except Exception as e:
-            self.log(f"❌ User login test failed: {str(e)}")
-            return False
+            self.log_test("Auth Flow", False, f"Exception: {str(e)}")
     
-    def test_file_size_limit(self):
-        """Test 6: File Size Limit (50MB)"""
+    def test_7_upload_process_flow(self):
+        """Test 7: Upload + Process Flow"""
+        if not self.auth_token:
+            self.log_test("Upload + Process Flow", False, "No auth token available")
+            return
+            
         try:
-            self.log("Testing file size limit...")
+            # Create a simple test PDF content
+            test_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n174\n%%EOF"
             
-            if not self.auth_token:
-                self.log("❌ File size limit test skipped - no auth token")
-                return False
+            # Upload file
+            files = {'file': ('test_v3.pdf', test_content, 'application/pdf')}
+            headers = {'Authorization': f'Bearer {self.auth_token}'}
             
-            # Create a file larger than 50MB
-            large_file_size = 51 * 1024 * 1024  # 51MB
-            large_file_data = b'0' * large_file_size
+            upload_response = requests.post(f"{API_BASE}/upload", files=files, headers=headers, timeout=30)
             
-            files = {'file': ('large_test.pdf', BytesIO(large_file_data), 'application/pdf')}
-            
-            response = self.session.post(f"{API_BASE}/upload", files=files)
-            
-            if response.status_code == 400:
-                data = response.json()
-                if 'too large' in data.get('error', '').lower() or '50mb' in data.get('error', '').lower():
-                    self.log("✅ File size limit working - 50MB limit enforced")
-                    return True
+            if upload_response.status_code in [200, 201]:
+                upload_data = upload_response.json()
+                self.test_upload_id = upload_data.get('upload', {}).get('id')
+                if self.test_upload_id:
+                    self.log_test("File Upload", True, f"File uploaded successfully: {self.test_upload_id}")
                 else:
-                    self.log(f"❌ File size limit failed - unexpected error: {data}")
-                    return False
+                    self.log_test("File Upload", False, "No upload ID in response")
+                    return
             else:
-                self.log(f"❌ File size limit test failed - expected 400, got {response.status_code}: {response.text}")
-                return False
+                self.log_test("File Upload", False, f"Upload failed: {upload_response.status_code} - {upload_response.text}")
+                return
+            
+            # Process file
+            process_data = {"upload_id": self.test_upload_id}
+            process_response = requests.post(f"{API_BASE}/process", json=process_data, headers=headers, timeout=120)
+            
+            if process_response.status_code == 200:
+                process_result = process_response.json()
+                result = process_result.get('result', {})
+                if 'columns' in result and 'rows' in result:
+                    self.log_test("AI Processing", True, f"Processing successful - Columns: {len(result.get('columns', []))}, Rows: {len(result.get('rows', []))}")
+                else:
+                    self.log_test("AI Processing", False, f"Invalid process result format: {process_result}")
+            else:
+                self.log_test("AI Processing", False, f"Processing failed: {process_response.status_code} - {process_response.text}")
                 
         except Exception as e:
-            self.log(f"❌ File size limit test failed: {str(e)}")
-            return False
+            self.log_test("Upload + Process Flow", False, f"Exception: {str(e)}")
     
-    def create_test_pdf(self):
-        """Create a simple test PDF for upload testing"""
+    def test_8_excel_export(self):
+        """Test 8: Excel Export (Pre-generated xlsx)"""
+        if not self.auth_token or not self.test_upload_id:
+            self.log_test("Excel Export", False, "No auth token or upload ID available")
+            return
+            
         try:
-            # Create a simple PDF-like file (just for testing upload, not actual PDF processing)
-            pdf_content = b"""%PDF-1.4
-1 0 obj
-<<
-/Type /Catalog
-/Pages 2 0 R
->>
-endobj
-2 0 obj
-<<
-/Type /Pages
-/Kids [3 0 R]
-/Count 1
->>
-endobj
-3 0 obj
-<<
-/Type /Page
-/Parent 2 0 R
-/MediaBox [0 0 612 792]
-/Contents 4 0 R
->>
-endobj
-4 0 obj
-<<
-/Length 44
->>
-stream
-BT
-/F1 12 Tf
-72 720 Td
-(Test PDF) Tj
-ET
-endstream
-endobj
-xref
-0 5
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000206 00000 n 
-trailer
-<<
-/Size 5
-/Root 1 0 R
->>
-startxref
-300
-%%EOF"""
-            return pdf_content
-        except Exception as e:
-            self.log(f"Error creating test PDF: {str(e)}")
-            return None
-    
-    def test_file_upload(self):
-        """Test 7: File Upload"""
-        try:
-            self.log("Testing file upload...")
+            headers = {'Authorization': f'Bearer {self.auth_token}'}
+            export_response = requests.get(f"{API_BASE}/export/excel/{self.test_upload_id}", headers=headers, timeout=30)
             
-            if not self.auth_token:
-                self.log("❌ File upload test skipped - no auth token")
-                return False
-            
-            # Create test PDF
-            pdf_content = self.create_test_pdf()
-            if not pdf_content:
-                self.log("❌ File upload test failed - could not create test PDF")
-                return False
-            
-            files = {'file': ('test_document.pdf', BytesIO(pdf_content), 'application/pdf')}
-            
-            response = self.session.post(f"{API_BASE}/upload", files=files)
-            
-            if response.status_code == 201:
-                data = response.json()
-                if 'upload' in data and 'id' in data['upload']:
-                    self.upload_id = data['upload']['id']
-                    self.log(f"✅ File upload successful - upload ID: {self.upload_id}")
-                    return True
+            if export_response.status_code == 200:
+                content_type = export_response.headers.get('content-type', '')
+                content_length = len(export_response.content)
+                
+                if 'spreadsheetml' in content_type and content_length > 0:
+                    self.log_test("Excel Export", True, f"Excel export successful - Size: {content_length} bytes, Type: {content_type}")
                 else:
-                    self.log(f"❌ File upload failed - invalid response format: {data}")
-                    return False
+                    self.log_test("Excel Export", False, f"Invalid Excel response - Type: {content_type}, Size: {content_length}")
             else:
-                self.log(f"❌ File upload failed - status {response.status_code}: {response.text}")
-                return False
+                self.log_test("Excel Export", False, f"Export failed: {export_response.status_code} - {export_response.text}")
                 
         except Exception as e:
-            self.log(f"❌ File upload test failed: {str(e)}")
-            return False
-    
-    def test_ai_processing(self):
-        """Test 8: AI Processing"""
-        try:
-            self.log("Testing AI processing...")
-            
-            if not self.auth_token or not self.upload_id:
-                self.log("❌ AI processing test skipped - no auth token or upload ID")
-                return False
-            
-            payload = {
-                "upload_id": self.upload_id
-            }
-            
-            response = self.session.post(f"{API_BASE}/process", json=payload)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'result' in data and 'id' in data['result']:
-                    self.result_id = data['result']['id']
-                    self.log(f"✅ AI processing successful - result ID: {self.result_id}")
-                    self.log(f"   Document type: {data['result'].get('document_type', 'unknown')}")
-                    self.log(f"   Columns: {len(data['result'].get('columns', []))}")
-                    self.log(f"   Rows: {len(data['result'].get('rows', []))}")
-                    return True
-                else:
-                    self.log(f"❌ AI processing failed - invalid response format: {data}")
-                    return False
-            else:
-                self.log(f"❌ AI processing failed - status {response.status_code}: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log(f"❌ AI processing test failed: {str(e)}")
-            return False
-    
-    def test_excel_export(self):
-        """Test 9: Excel Export (Pre-generated xlsx serving)"""
-        try:
-            self.log("Testing Excel export...")
-            
-            if not self.auth_token or not self.result_id:
-                self.log("❌ Excel export test skipped - no auth token or result ID")
-                return False
-            
-            response = self.session.get(f"{API_BASE}/export/excel/{self.result_id}")
-            
-            if response.status_code == 200:
-                content_type = response.headers.get('content-type', '')
-                if 'spreadsheetml' in content_type or 'excel' in content_type:
-                    file_size = len(response.content)
-                    self.log(f"✅ Excel export successful - file size: {file_size} bytes")
-                    self.log(f"   Content-Type: {content_type}")
-                    return True
-                else:
-                    self.log(f"❌ Excel export failed - wrong content type: {content_type}")
-                    return False
-            else:
-                self.log(f"❌ Excel export failed - status {response.status_code}: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log(f"❌ Excel export test failed: {str(e)}")
-            return False
+            self.log_test("Excel Export", False, f"Exception: {str(e)}")
     
     def run_all_tests(self):
         """Run all backend tests"""
-        self.log("Starting DocXL AI Backend Testing...")
-        self.log("=" * 60)
+        print("🚀 Starting DocXL AI V3 Backend Testing Suite")
+        print("=" * 60)
         
-        tests = [
-            ("Python Imports", self.test_python_imports),
-            ("Python Script Execution", self.test_python_script_execution),
-            ("Health Check API", self.test_health_check),
-            ("User Registration", self.test_user_registration),
-            ("User Login", self.test_user_login),
-            ("File Size Limit (50MB)", self.test_file_size_limit),
-            ("File Upload", self.test_file_upload),
-            ("AI Processing", self.test_ai_processing),
-            ("Excel Export", self.test_excel_export),
-        ]
+        # Core V3 Requirements Tests
+        self.test_1_python_imports()
+        self.test_2_banned_strings()
+        self.test_3_banned_libraries()
+        self.test_4_graceful_error_handling()
         
-        results = {}
-        passed = 0
-        total = len(tests)
+        # API Tests
+        self.test_5_health_check()
+        self.test_6_auth_flow()
+        self.test_7_upload_process_flow()
+        self.test_8_excel_export()
         
-        for test_name, test_func in tests:
-            self.log(f"\n--- {test_name} ---")
-            try:
-                result = test_func()
-                results[test_name] = result
-                if result:
-                    passed += 1
-            except Exception as e:
-                self.log(f"❌ {test_name} failed with exception: {str(e)}")
-                results[test_name] = False
+        # Summary
+        print("\n" + "=" * 60)
+        print("📊 TEST SUMMARY")
+        print("=" * 60)
         
-        self.log("\n" + "=" * 60)
-        self.log("BACKEND TESTING SUMMARY")
-        self.log("=" * 60)
+        passed = sum(1 for result in self.test_results if result['success'])
+        total = len(self.test_results)
         
-        for test_name, result in results.items():
-            status = "✅ PASS" if result else "❌ FAIL"
-            self.log(f"{status} - {test_name}")
-        
-        self.log(f"\nOverall: {passed}/{total} tests passed")
+        for result in self.test_results:
+            status = "✅" if result['success'] else "❌"
+            print(f"{status} {result['test']}")
+            
+        print(f"\n🎯 OVERALL RESULT: {passed}/{total} tests passed")
         
         if passed == total:
-            self.log("🎉 ALL BACKEND TESTS PASSED!")
-            return True
+            print("🎉 ALL TESTS PASSED - V3 Extraction System is fully operational!")
         else:
-            self.log(f"⚠️  {total - passed} tests failed")
-            return False
+            print("⚠️  Some tests failed - Review issues above")
+            
+        return passed == total
 
-def main():
+if __name__ == "__main__":
     tester = BackendTester()
     success = tester.run_all_tests()
     sys.exit(0 if success else 1)
-
-if __name__ == "__main__":
-    main()

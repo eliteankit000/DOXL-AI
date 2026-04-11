@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-DocXL AI — PDF-to-Excel Extraction Entry Point
+DocXL AI - PDF-to-Excel Extraction Entry Point
 
 Calls extract_and_build() to generate a styled .xlsx file directly.
-Outputs JSON with extraction summary to stdout.
+Outputs JSON summary to stdout for route.js DB storage.
 
 Usage:
     python scripts/extract.py <file_path>
@@ -22,11 +22,11 @@ def main():
     file_path = sys.argv[1]
 
     if not os.path.exists(file_path):
-        print(json.dumps({"error": f"File not found: {file_path}"}))
+        print(json.dumps({"error": "File not found: {}".format(file_path)}))
         sys.exit(1)
 
-    print(f"[extract] File: {file_path}", file=sys.stderr)
-    print(f"[extract] Size: {os.path.getsize(file_path)} bytes", file=sys.stderr)
+    print("[extract] File: {}".format(file_path), file=sys.stderr)
+    print("[extract] Size: {} bytes".format(os.path.getsize(file_path)), file=sys.stderr)
 
     start_time = time.time()
 
@@ -39,16 +39,17 @@ def main():
 
         xlsx_path = result.get("xlsx_path", "")
         if xlsx_path and os.path.exists(xlsx_path):
-            print(f"[extract] xlsx generated: {xlsx_path} ({os.path.getsize(xlsx_path)} bytes)", file=sys.stderr)
+            print("[extract] xlsx generated: {} ({} bytes)".format(
+                xlsx_path, os.path.getsize(xlsx_path)), file=sys.stderr)
         else:
             print("[extract] WARNING: No xlsx file generated", file=sys.stderr)
 
-        print(f"[extract] Columns: {len(result.get('columns', []))}", file=sys.stderr)
-        print(f"[extract] Rows: {len(result.get('rows', []))}", file=sys.stderr)
-        print(f"[extract] Method: {result.get('extraction_method', 'unknown')}", file=sys.stderr)
+        print("[extract] Columns: {}".format(len(result.get('columns', []))), file=sys.stderr)
+        print("[extract] Rows: {}".format(len(result.get('rows', []))), file=sys.stderr)
+        print("[extract] Method: {}".format(result.get('extraction_method', 'unknown')), file=sys.stderr)
 
-    except Exception as e:
-        print(f"[extract] Fatal error: {str(e)}", file=sys.stderr)
+    except Exception as exc:
+        print("[extract] Fatal error: {}".format(str(exc)), file=sys.stderr)
         import traceback
         traceback.print_exc(file=sys.stderr)
         result = {
@@ -56,12 +57,11 @@ def main():
             "rows": [],
             "document_type": "unknown",
             "confidence": 0.0,
-            "error": f"Extraction failed: {str(e)}",
+            "error": "Extraction failed: {}".format(str(exc)),
             "processing_time": time.time() - start_time,
             "xlsx_path": "",
         }
 
-    # Output result as JSON to stdout
     print(json.dumps(result, indent=2))
 
 

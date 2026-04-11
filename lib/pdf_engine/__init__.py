@@ -1,14 +1,13 @@
 """
-DocXL AI — PDF Engine Package
-pdfplumber + openpyxl based PDF-to-Excel conversion
+DocXL AI - PDF Engine Package
+Universal PDF-to-Excel conversion using pdfplumber + openpyxl
 """
 
-__version__ = "11.0.0"
-__author__ = "DocXL AI"
-
-from .extractor import extract_and_build, get_extraction_summary
+from .extractor import extract_and_build, extract_pdf_content, build_excel, get_extraction_summary
 
 __all__ = [
     'extract_and_build',
+    'extract_pdf_content',
+    'build_excel',
     'get_extraction_summary',
 ]

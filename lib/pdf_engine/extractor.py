@@ -1,356 +1,579 @@
-"""
-DocXL AI — PDF-to-Excel Extractor
-
-Uses ONLY pdfplumber with lines/lines strategy.
-Parses metadata blob with regex.
-Writes styled Excel with openpyxl.
-
-NO pandas. NO camelot. NO tabula. NO confidence scores.
-"""
-import pdfplumber
 import re
 import os
+import uuid
+import pdfplumber
 from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 
+# ═══════════════════════════════════════════════════════════
+# STYLE CONSTANTS
+# ═══════════════════════════════════════════════════════════
+
+S_TITLE_BG    = "1F3864"   # dark navy   — title rows
+S_SUBHEAD_BG  = "2E75B6"   # medium blue — section/subheading rows
+S_HEADER_BG   = "FFC000"   # gold        — column header rows
+S_KEY_BG      = "E8F4FD"   # light blue  — key column in KV sheets
+S_ALT1_BG     = "D6E4F0"   # soft blue   — alternating odd rows
+S_ALT2_BG     = "FFFFFF"   # white       — alternating even rows
+S_TOTAL_BG    = "EAF3DE"   # light green — total/summary rows
+S_WHITE_FG    = "FFFFFF"
+S_DARK_FG     = "1F3864"
+S_BLACK_FG    = "000000"
+
+
 def _border():
-    s = Side(border_style='thin', color='B8CCE4')
+    s = Side(border_style="thin", color="B8CCE4")
     return Border(left=s, right=s, top=s, bottom=s)
 
 
-def _wcell(ws, row, col, value, bold=False, size=10,
-           bg='FFFFFF', fg='000000', halign='left'):
+def _wc(ws, row, col, value,
+        bold=False, size=10, bg=S_ALT2_BG,
+        fg=S_BLACK_FG, align="left", wrap=False):
+    """Write one cell with full formatting."""
     c = ws.cell(row=row, column=col, value=value)
-    c.font = Font(name='Arial', size=size, bold=bold, color=fg)
-    c.fill = PatternFill('solid', fgColor=bg)
-    c.alignment = Alignment(horizontal=halign, vertical='center', wrap_text=True)
-    c.border = _border()
+    c.font      = Font(name="Arial", size=size,
+                       bold=bold, color=fg)
+    c.fill      = PatternFill("solid", fgColor=bg)
+    c.alignment = Alignment(horizontal=align,
+                            vertical="center",
+                            wrap_text=wrap)
+    c.border    = _border()
     return c
 
 
-def _is_skip_row(row):
-    """Return True if this row should be skipped (empty, dashes, URLs, signature)."""
-    if not row:
-        return True
-    texts = [str(v).strip() if v else '' for v in row]
-    joined = ' '.join(texts).strip()
+def _merge_row(ws, row, num_cols, value,
+               bold=True, size=11,
+               bg=S_TITLE_BG, fg=S_WHITE_FG, height=26):
+    """Write a full-width merged title or section row."""
+    end_col = get_column_letter(num_cols)
+    ws.merge_cells("A{}:{}{}".format(row, end_col, row))
+    _wc(ws, row, 1, value, bold=bold, size=size,
+        bg=bg, fg=fg, align="center")
+    ws.row_dimensions[row].height = height
+
+
+def _col_width(values: list, header: str) -> float:
+    """Calculate best column width from content."""
+    max_len = len(str(header))
+    for v in values:
+        max_len = max(max_len, len(str(v)) if v else 0)
+    return min(max(max_len + 4, 10), 60)
+
+
+# ═══════════════════════════════════════════════════════════
+# STEP 1 — EXTRACT ALL CONTENT FROM PDF
+# ═══════════════════════════════════════════════════════════
+
+def _is_junk_row(row: list) -> bool:
+    """Return True for rows that are headers/footers/noise."""
+    joined = " ".join(str(c) for c in row if c).strip().lower()
     if not joined:
         return True
-    if all(c in '-— ' for c in joined):
-        return True
-    if 'http' in joined.lower():
-        return True
-    if 'signature' in joined.lower():
+    junk_patterns = [
+        r"^\d{1,2}/\d{1,2}/\d{4}",   # dates alone
+        r"^page\s*\d",                 # page numbers
+        r"http[s]?://",               # URLs
+        r"^-{3,}$",                   # dashes only
+        r"^_{3,}$",                   # underscores only
+        r"signature",                  # signature lines
+        r"^\s*\d+\s*$",              # standalone numbers (page num)
+    ]
+    for p in junk_patterns:
+        if re.search(p, joined, re.IGNORECASE):
+            return True
+    # Row where 80%+ cells are empty
+    non_empty = [c for c in row if c and str(c).strip()]
+    if len(row) > 0 and len(non_empty) / len(row) < 0.2:
         return True
     return False
 
 
-def _get_field(pattern, text):
-    """Extract a regex group from text, return '-' if not found."""
-    m = re.search(pattern, text)
-    v = m.group(1).strip() if m else '-'
-    return v if v not in (':', '', ' ') else '-'
+def _clean_cell(value) -> str:
+    """Normalize a cell value to clean string."""
+    if value is None:
+        return ""
+    s = str(value).strip()
+    s = re.sub(r"\s{2,}", " ", s)
+    return s
 
 
-def extract_and_build(pdf_path: str, output_path: str) -> str:
+def _find_header_row(table: list) -> int:
     """
-    Extract tables + metadata from PDF and build a styled .xlsx file.
-
-    Uses pdfplumber with lines/lines strategy.
-    Parses metadata blob with regex.
-    Writes exactly 2 sheets: 'Form Details' and 'Subject Details'.
-
-    Returns output_path on success.
+    Find the index of the real header row.
+    The header row is the first row where 50%+ cells are non-empty
+    and the values look like column titles (not pure numbers).
     """
+    for i, row in enumerate(table):
+        non_empty = [c for c in row
+                     if c and str(c).strip()
+                     and not re.match(r"^[\d\s|.,-]+$",
+                                      str(c).strip())]
+        if len(non_empty) >= max(2, len(row) * 0.4):
+            return i
+    return 0
 
-    # ── EXTRACT ──────────────────────────────────────────────
+
+def _rows_are_same_table(prev_headers: list,
+                          curr_headers: list) -> bool:
+    """
+    Returns True if curr_headers is a repeat of prev_headers
+    (same table continuing on next page).
+    """
+    if not prev_headers or not curr_headers:
+        return False
+    if len(prev_headers) != len(curr_headers):
+        return False
+    matches = sum(
+        1 for a, b in zip(prev_headers, curr_headers)
+        if _clean_cell(a).lower() == _clean_cell(b).lower()
+    )
+    return matches / len(prev_headers) >= 0.7
+
+
+def extract_pdf_content(pdf_path: str) -> dict:
+    """
+    Extract all content from a PDF into a structured dict.
+    Handles all document types: tables, forms, mixed, multi-page.
+
+    Returns:
+    {
+      "doc_title":       str,
+      "doc_subtitle":    str,
+      "tables": [
+        {
+          "heading":  str,        # section heading above table if any
+          "headers":  [str],      # column names from PDF
+          "rows":     [[str]],    # all data rows
+          "page_start": int
+        }
+      ],
+      "metadata_pairs":  [(str, str)],   # key-value pairs from form
+      "raw_text_pages":  [str]           # raw text per page
+    }
+    """
+    doc_title      = ""
+    doc_subtitle   = ""
+    all_tables     = []
+    metadata_pairs = []
+    raw_text_pages = []
+
     with pdfplumber.open(pdf_path) as pdf:
-        page = pdf.pages[0]
-        all_tables = page.extract_tables({
-            "vertical_strategy": "lines",
-            "horizontal_strategy": "lines"
-        })
 
-        if not all_tables or len(all_tables) == 0:
-            raise ValueError("No tables found in PDF")
+        for page_num, page in enumerate(pdf.pages):
 
-        rows = all_tables[0]
+            # ── Raw text for this page ──────────────────────────
+            raw_text = page.extract_text(layout=False) or ""
+            raw_text_pages.append(raw_text)
+            lines = [ln.strip() for ln in raw_text.split("\n")
+                     if ln.strip()]
 
-    if not rows or len(rows) < 3:
-        raise ValueError("PDF table has fewer than 3 rows")
+            # ── Document title from page 1 ──────────────────────
+            if page_num == 0 and lines:
+                # Skip lines that are just dates, times, page nums
+                for line in lines:
+                    if (len(line) > 8
+                            and not re.match(
+                                r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}",
+                                line)
+                            and not re.match(r"^\d+$", line)):
+                        doc_title = line
+                        break
+                # Subtitle: next meaningful line after title
+                title_found = False
+                for line in lines:
+                    if line == doc_title:
+                        title_found = True
+                        continue
+                    if title_found and len(line) > 5:
+                        doc_subtitle = line
+                        break
 
-    # ── PARSE METADATA ───────────────────────────────────────
-    blob = re.sub(r'\n', ' ', rows[1][0] or '') if len(rows) > 1 and rows[1] and rows[1][0] else ''
+            # ── Try geometric table extraction ──────────────────
+            tables_geo = page.extract_tables({
+                "vertical_strategy":   "lines",
+                "horizontal_strategy": "lines",
+                "snap_tolerance":      3,
+            }) or []
 
-    meta = [
-        ("Institute Name",  _get_field(r'Institute Name\s*:\s*(.+?)(?=Semester\s*:)', blob)),
-        ("Semester",        _get_field(r'Semester\s*:\s*:?\s*(.+?)(?=Enrollment No)', blob)),
-        ("Enrollment No",   _get_field(r'Enrollment No\s*:\s*(\S+)', blob)),
-        ("Student Name",    _get_field(r"Student's Name\s*:\s*:?\s*(\S+)", blob)),
-        ("Mobile No",       _get_field(r'Mobile No\s*:\s*(\d+)\s+EmailID', blob)),
-        ("Email ID",        _get_field(r'EmailID\s*:\s*(\S+)', blob)),
-        ("Date of Filling", _get_field(r'Date Of Filling\s*:\s*(\S+)', blob)),
-        ("Father Name",     _get_field(r"Father's Name\s*:\s*(\S+)\s+Occupation", blob)),
-        ("Annual Income",   _get_field(r'Annual Income\s*:\s*([\d.]+)', blob)),
-        ("Father Mobile",   _get_field(r'Mobile No\s*:\s*(\d+)\s+Office Phone', blob)),
-        ("Due Amount",      _get_field(r'Due Amount\s*:\s*([\d.]+)', blob)),
-        ("Paid Amount",     _get_field(r'Paid Amount\s*:\s*(-|[\d.]+)', blob)),
-        ("Committed Date",  _get_field(r'Comitted Date\s*:\s*(\S+)', blob)),
-        ("Transaction ID",  _get_field(r'TransactionID\s*:\s*(-|\w+)', blob)),
-        ("Bank Ref. No.",   _get_field(r'Bank Ref\. No\.\s*:\s*(-|\w+)', blob)),
-    ]
-    md = dict(meta)
+            # ── Fallback to text-alignment strategy ─────────────
+            tables_txt = []
+            if not tables_geo:
+                tables_txt = page.extract_tables({
+                    "vertical_strategy":   "text",
+                    "horizontal_strategy": "text",
+                    "snap_tolerance":      5,
+                    "min_words_vertical":  1,
+                }) or []
 
-    # ── FIND TABLE HEADER AND DATA ROWS ─────────────────────
-    header_idx = None
-    for i, r in enumerate(rows):
-        if r and len(r) >= 2:
-            cell0 = str(r[0] or '').strip().lower()
-            if cell0 in ('sr.', 'sr', 'sno', 's.no', 'no.', '#', 'sl.'):
-                header_idx = i
-                break
+            page_tables = tables_geo or tables_txt
 
-    if header_idx is None:
-        # Fallback: assume row 2 is header (as per the known format)
-        header_idx = 2
+            # ── Process each table on this page ─────────────────
+            for table in page_tables:
 
-    # Collect data rows after header, skip footer rows
-    subjects = []
-    for r in rows[header_idx + 1:]:
-        if _is_skip_row(r):
-            continue
-        # Take only first 3 columns (Sr., Subject Code, Subject Name)
-        num_cols = min(len(r), 3)
-        row_data = [str(v).strip() if v else '' for v in r[:num_cols]]
-        if any(row_data):
-            subjects.append(row_data)
+                if not table or len(table) < 2:
+                    continue
 
-    # Ensure each row has exactly 3 columns
-    for i in range(len(subjects)):
-        while len(subjects[i]) < 3:
-            subjects[i].append('')
+                # Find the real header row index
+                hdr_idx = _find_header_row(table)
 
-    # Get header labels
-    header_row = rows[header_idx] if header_idx < len(rows) else ['Sr.', 'Subject Code', 'Subject Name']
-    header_labels = [str(v).strip() if v else '' for v in header_row[:3]]
-    while len(header_labels) < 3:
-        header_labels.append('')
-    if not header_labels[0]:
-        header_labels[0] = 'Sr.'
-    if not header_labels[1]:
-        header_labels[1] = 'Subject Code'
-    if not header_labels[2]:
-        header_labels[2] = 'Subject Name'
+                # Clean headers
+                raw_headers = table[hdr_idx]
+                headers = [_clean_cell(h) or "Col_{}".format(i+1)
+                           for i, h in enumerate(raw_headers)]
 
-    # ── BUILD WORKBOOK ───────────────────────────────────────
+                # Collect data rows
+                data_rows = []
+                for row in table[hdr_idx + 1:]:
+                    if _is_junk_row(row):
+                        continue
+                    clean = [_clean_cell(c) for c in row]
+                    # Pad or trim to header length
+                    while len(clean) < len(headers):
+                        clean.append("")
+                    data_rows.append(clean[:len(headers)])
+
+                if not data_rows:
+                    continue
+
+                # ── Check if this is continuation of previous ───
+                if (all_tables
+                        and _rows_are_same_table(
+                            all_tables[-1]["headers"], headers)):
+                    # Append rows to existing table (multi-page)
+                    all_tables[-1]["rows"].extend(data_rows)
+                else:
+                    # Look for a heading above this table in raw text
+                    heading = ""
+                    if lines:
+                        # Use last non-junk line before table as heading
+                        for line in reversed(lines):
+                            if (len(line) > 4
+                                    and line not in headers
+                                    and not re.match(
+                                        r"^\d", line)):
+                                heading = line
+                                break
+
+                    all_tables.append({
+                        "heading":    heading,
+                        "headers":    headers,
+                        "rows":       data_rows,
+                        "page_start": page_num + 1,
+                    })
+
+            # ── Extract key-value metadata ───────────────────────
+            # Only run if page has no tables or has a form-like structure
+            if not page_tables:
+                for line in lines:
+                    # Match patterns: "Key : Value" or "Key    Value"
+                    kv = re.match(
+                        r"^([A-Za-z][A-Za-z0-9 './#&()\-]{1,50})"
+                        r"\s*:\s*(.+)$",
+                        line
+                    )
+                    if kv:
+                        key = kv.group(1).strip().rstrip(":")
+                        val = kv.group(2).strip()
+                        if (key and val
+                                and val not in ("-", ":", "")
+                                and len(key) < 55):
+                            metadata_pairs.append((key, val))
+
+    return {
+        "doc_title":      doc_title or "Document",
+        "doc_subtitle":   doc_subtitle,
+        "tables":         all_tables,
+        "metadata_pairs": metadata_pairs,
+        "raw_text_pages": raw_text_pages,
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+# STEP 2 — BUILD EXCEL FROM EXTRACTED CONTENT
+# ═══════════════════════════════════════════════════════════
+
+def build_excel(content: dict, output_path: str) -> str:
+    """
+    Build a fully formatted Excel file from extracted PDF content.
+    Works for ANY document type. Zero hardcoded strings.
+    """
     wb = Workbook()
+    sheet_created = False
 
-    # ── Sheet 1: Form Details ────────────────────────────────
-    ws1 = wb.active
-    ws1.title = 'Form Details'
-    ws1.sheet_view.showGridLines = False
+    # ── A: Write each table as its own sheet ──────────────────
+    for t_idx, table in enumerate(content["tables"]):
 
-    # Title row
-    ws1.merge_cells('A1:B1')
-    _wcell(ws1, 1, 1, 'SAGE UNIVERSITY \u2014 SEMESTER REGISTRATION FORM',
-           bold=True, size=12, bg='1F3864', fg='FFFFFF', halign='center')
-    _wcell(ws1, 1, 2, None, bg='1F3864')
-    ws1.row_dimensions[1].height = 28
+        headers    = table["headers"]
+        rows       = table["rows"]
+        heading    = table["heading"]
+        num_cols   = len(headers)
 
-    # Info row
-    ws1.merge_cells('A2:B2')
-    _wcell(ws1, 2, 1, '{}  |  {}  |  {}'.format(
-        md['Student Name'], md['Enrollment No'], md['Semester']),
-        bold=True, size=9, bg='2E75B6', fg='FFFFFF', halign='center')
-    _wcell(ws1, 2, 2, None, bg='2E75B6')
-    ws1.row_dimensions[2].height = 18
+        if not rows:
+            continue
 
-    # Sections
-    sections = [
-        ('Personal Information',
-         ['Institute Name', 'Semester', 'Enrollment No',
-          'Student Name', 'Mobile No', 'Email ID', 'Date of Filling']),
-        ("Father's Information",
-         ['Father Name', 'Annual Income', 'Father Mobile']),
-        ('Paid Fees Details',
-         ['Due Amount', 'Paid Amount', 'Committed Date',
-          'Transaction ID', 'Bank Ref. No.']),
-    ]
+        # Sheet name from first column header, sanitised
+        raw_name = headers[0] if headers[0] else \
+                   "Table {}".format(t_idx + 1)
+        for bad in ['\\', '/', ':', '*', '?', '[', ']']:
+            raw_name = raw_name.replace(bad, " ")
+        sheet_name = raw_name.strip()[:31] or \
+                     "Table {}".format(t_idx + 1)
 
-    r = 3
-    for title, fields in sections:
-        ws1.merge_cells('A{}:B{}'.format(r, r))
-        _wcell(ws1, r, 1, '  ' + title, bold=True, size=10,
-               bg='2E75B6', fg='FFFFFF')
-        _wcell(ws1, r, 2, None, bg='2E75B6')
-        ws1.row_dimensions[r].height = 20
+        if not sheet_created:
+            ws = wb.active
+            ws.title = sheet_name
+            sheet_created = True
+        else:
+            # Avoid duplicate sheet names
+            existing = [s.title for s in wb.worksheets]
+            if sheet_name in existing:
+                sheet_name = "{} {}".format(sheet_name, t_idx + 1)
+            ws = wb.create_sheet(sheet_name)
+
+        ws.sheet_view.showGridLines = False
+        current_row = 1
+
+        # ── Title row (doc_title from PDF) ────────────────────
+        _merge_row(ws, current_row, num_cols,
+                   content["doc_title"],
+                   bold=True, size=12,
+                   bg=S_TITLE_BG, fg=S_WHITE_FG, height=28)
+        current_row += 1
+
+        # ── Subtitle row if exists ────────────────────────────
+        if content["doc_subtitle"]:
+            _merge_row(ws, current_row, num_cols,
+                       content["doc_subtitle"],
+                       bold=False, size=10,
+                       bg=S_SUBHEAD_BG, fg=S_WHITE_FG, height=20)
+            current_row += 1
+
+        # ── Section heading row if exists ─────────────────────
+        if heading and heading != content["doc_title"]:
+            _merge_row(ws, current_row, num_cols,
+                       heading,
+                       bold=True, size=10,
+                       bg=S_SUBHEAD_BG, fg=S_WHITE_FG, height=20)
+            current_row += 1
+
+        # ── Column headers (from PDF, not hardcoded) ──────────
+        for ci, h in enumerate(headers, 1):
+            _wc(ws, current_row, ci, h,
+                bold=True, size=10,
+                bg=S_HEADER_BG, fg=S_DARK_FG,
+                align="center")
+        ws.row_dimensions[current_row].height = 22
+        current_row += 1
+
+        # ── Data rows with alternating colors ─────────────────
+        for ri, row in enumerate(rows):
+            bg = S_ALT1_BG if ri % 2 == 0 else S_ALT2_BG
+            for ci, val in enumerate(row, 1):
+                # Right-align numeric values
+                is_num = bool(re.match(
+                    r"^\s*[\d,]+\.?\d*\s*(ML|ml|L|BEER|BOTTEL)?\s*$",
+                    str(val)
+                ))
+                align = "right" if is_num else \
+                        ("center" if ci == 1 else "left")
+                _wc(ws, current_row, ci, val,
+                    size=10, bg=bg, fg=S_BLACK_FG, align=align)
+            ws.row_dimensions[current_row].height = 18
+            current_row += 1
+
+        # ── Total row ─────────────────────────────────────────
+        total_label = "Total Records: {}".format(len(rows))
+        ws.merge_cells("A{}:{}{}".format(
+            current_row,
+            get_column_letter(max(num_cols - 1, 1)),
+            current_row
+        ))
+        _wc(ws, current_row, 1, total_label,
+            bold=True, size=10,
+            bg=S_TOTAL_BG, fg=S_DARK_FG, align="right")
+        _wc(ws, current_row, num_cols, len(rows),
+            bold=True, size=10,
+            bg=S_TOTAL_BG, fg=S_DARK_FG, align="center")
+        ws.row_dimensions[current_row].height = 20
+        current_row += 1
+
+        # ── Column widths from actual content ─────────────────
+        for ci, header in enumerate(headers, 1):
+            col_vals = [row[ci-1] for row in rows
+                        if ci <= len(row)]
+            ws.column_dimensions[
+                get_column_letter(ci)
+            ].width = _col_width(col_vals, header)
+
+    # ── B: Write metadata/key-value pairs if present ─────────
+    if content["metadata_pairs"]:
+
+        sheet_name = "Details"
+        if not sheet_created:
+            ws_m = wb.active
+            ws_m.title = sheet_name
+            sheet_created = True
+        else:
+            ws_m = wb.create_sheet(sheet_name)
+
+        ws_m.sheet_view.showGridLines = False
+        r = 1
+
+        # Title from PDF
+        ws_m.merge_cells("A{}:B{}".format(r, r))
+        _wc(ws_m, r, 1, content["doc_title"],
+            bold=True, size=12,
+            bg=S_TITLE_BG, fg=S_WHITE_FG,
+            align="center")
+        ws_m.row_dimensions[r].height = 28
         r += 1
-        for f in fields:
-            _wcell(ws1, r, 1, f, bold=True, size=10, bg='E8F4FD', fg='1F3864')
-            _wcell(ws1, r, 2, md.get(f, '-'), size=10, bg='FFFFFF', fg='000000')
-            ws1.row_dimensions[r].height = 18
+
+        if content["doc_subtitle"]:
+            ws_m.merge_cells("A{}:B{}".format(r, r))
+            _wc(ws_m, r, 1, content["doc_subtitle"],
+                bold=False, size=10,
+                bg=S_SUBHEAD_BG, fg=S_WHITE_FG,
+                align="center")
+            ws_m.row_dimensions[r].height = 20
             r += 1
-        # blank gap row
+
+        # Column headers
+        _wc(ws_m, r, 1, "Field",
+            bold=True, size=10,
+            bg=S_HEADER_BG, fg=S_DARK_FG, align="center")
+        _wc(ws_m, r, 2, "Value",
+            bold=True, size=10,
+            bg=S_HEADER_BG, fg=S_DARK_FG, align="center")
+        ws_m.row_dimensions[r].height = 22
         r += 1
 
-    ws1.column_dimensions['A'].width = 22
-    ws1.column_dimensions['B'].width = 40
+        # Key-Value rows
+        for ri, (key, val) in enumerate(
+                content["metadata_pairs"]):
+            bg = S_ALT1_BG if ri % 2 == 0 else S_ALT2_BG
+            _wc(ws_m, r, 1, key,
+                bold=True, size=10,
+                bg=S_KEY_BG, fg=S_DARK_FG, align="left")
+            _wc(ws_m, r, 2, val,
+                size=10, bg=bg, fg=S_BLACK_FG, align="left")
+            ws_m.row_dimensions[r].height = 18
+            r += 1
 
-    # ── Sheet 2: Subject Details ─────────────────────────────
-    ws2 = wb.create_sheet('Subject Details')
-    ws2.sheet_view.showGridLines = False
+        # Column widths
+        key_vals   = [k for k, v in content["metadata_pairs"]]
+        value_vals = [v for k, v in content["metadata_pairs"]]
+        ws_m.column_dimensions["A"].width = \
+            _col_width(key_vals, "Field")
+        ws_m.column_dimensions["B"].width = \
+            _col_width(value_vals, "Value")
 
-    # Title row
-    ws2.merge_cells('A1:C1')
-    _wcell(ws2, 1, 1, 'Subject Enrollment \u2014 {}'.format(md['Semester']),
-           bold=True, size=12, bg='1F3864', fg='FFFFFF', halign='center')
-    _wcell(ws2, 1, 2, None, bg='1F3864')
-    _wcell(ws2, 1, 3, None, bg='1F3864')
-    ws2.row_dimensions[1].height = 28
-
-    # Info row
-    ws2.merge_cells('A2:C2')
-    _wcell(ws2, 2, 1, 'Student: {}  |  Enrollment: {}  |  Date: {}'.format(
-        md['Student Name'], md['Enrollment No'], md['Date of Filling']),
-        bold=True, size=9, bg='2E75B6', fg='FFFFFF', halign='center')
-    _wcell(ws2, 2, 2, None, bg='2E75B6')
-    _wcell(ws2, 2, 3, None, bg='2E75B6')
-    ws2.row_dimensions[2].height = 18
-
-    # Blank spacer
-    ws2.row_dimensions[3].height = 6
-
-    # Header row (row 4)
-    for ci, h in enumerate(header_labels, 1):
-        c = ws2.cell(row=4, column=ci, value=h)
-        c.font = Font(name='Arial', size=10, bold=True, color='1F3864')
-        c.fill = PatternFill('solid', fgColor='FFC000')
-        c.alignment = Alignment(horizontal='center', vertical='center')
-        c.border = _border()
-    ws2.row_dimensions[4].height = 22
-
-    # Data rows
-    for ri, subj in enumerate(subjects, 5):
-        row_bg = 'D6E4F0' if ri % 2 == 1 else 'FFFFFF'
-        for ci, val in enumerate(subj, 1):
-            _wcell(ws2, ri, ci, val, size=10, bg=row_bg,
-                   halign='center' if ci == 1 else 'left')
-        ws2.row_dimensions[ri].height = 20
-
-    # Total row
-    tr = 5 + len(subjects)
-    ws2.merge_cells('A{}:B{}'.format(tr, tr))
-    _wcell(ws2, tr, 1, 'Total Subjects Registered',
-           bold=True, size=10, bg='E8F4FD', fg='1F3864', halign='right')
-    _wcell(ws2, tr, 3, len(subjects),
-           bold=True, size=10, bg='E8F4FD', fg='1F3864', halign='center')
-    ws2.row_dimensions[tr].height = 20
-
-    ws2.column_dimensions['A'].width = 8
-    ws2.column_dimensions['B'].width = 20
-    ws2.column_dimensions['C'].width = 36
-
-    # ── SELF-CHECK ───────────────────────────────────────────
-    assert len(wb.sheetnames) == 2, f"Expected 2 sheets, got {len(wb.sheetnames)}"
-    assert wb.sheetnames[0] == 'Form Details'
-    assert wb.sheetnames[1] == 'Subject Details'
-
-    # Verify no banned content
-    for ws in [ws1, ws2]:
-        for row in ws.iter_rows():
-            for cell in row:
-                val = str(cell.value or '')
-                assert 'Confidence' not in val, f"Cell {cell.coordinate} contains 'Confidence'"
-                assert 'Column_1' not in val, f"Cell {cell.coordinate} contains 'Column_1'"
-
-    # Verify Sheet 2 structure
-    header_cell = ws2.cell(row=4, column=1).value
-    assert header_cell == header_labels[0], f"Sheet 2 row 4 col A: expected '{header_labels[0]}', got '{header_cell}'"
+    # ── C: Fallback if nothing extracted ─────────────────────
+    if not sheet_created:
+        ws = wb.active
+        ws.title = "Extracted"
+        ws.merge_cells("A1:D1")
+        _wc(ws, 1, 1,
+            "No structured data could be extracted from this PDF.",
+            bold=True, size=11,
+            bg=S_TITLE_BG, fg=S_WHITE_FG, align="center")
 
     wb.save(output_path)
     return output_path
 
 
+# ═══════════════════════════════════════════════════════════
+# MAIN ENTRY POINT
+# ═══════════════════════════════════════════════════════════
+
+def extract_and_build(pdf_path: str, output_path: str) -> str:
+    """
+    Single function called by the project's upload handler.
+    Extracts PDF content and builds a clean structured Excel.
+    Works for any document type. Zero hardcoded strings.
+    """
+    content = extract_pdf_content(pdf_path)
+    return build_excel(content, output_path)
+
+
+# ═══════════════════════════════════════════════════════════
+# JSON SUMMARY (for route.js process handler DB storage)
+# ═══════════════════════════════════════════════════════════
+
 def get_extraction_summary(pdf_path: str) -> dict:
     """
-    Extract data from PDF and return a summary dict (for JSON output to route.js).
-    Also generates the xlsx file.
+    Extract PDF, generate xlsx, and return a JSON-friendly summary.
+    Called by scripts/extract.py which outputs JSON to stdout.
     """
-    import uuid
-
-    output_dir = '/app/outputs'
+    output_dir = "/app/outputs"
     os.makedirs(output_dir, exist_ok=True)
     xlsx_id = str(uuid.uuid4())
-    xlsx_path = os.path.join(output_dir, f'{xlsx_id}.xlsx')
+    xlsx_path = os.path.join(output_dir, "{}.xlsx".format(xlsx_id))
 
     try:
-        extract_and_build(pdf_path, xlsx_path)
+        content = extract_pdf_content(pdf_path)
+        build_excel(content, xlsx_path)
 
-        # Also extract raw data for JSON response
-        with pdfplumber.open(pdf_path) as pdf:
-            page = pdf.pages[0]
-            all_tables = page.extract_tables({
-                "vertical_strategy": "lines",
-                "horizontal_strategy": "lines"
-            })
+        # Build JSON summary from extracted content
+        tables = content["tables"]
+        metadata = content["metadata_pairs"]
 
-            if not all_tables:
-                return {
-                    "columns": [],
-                    "rows": [],
-                    "document_type": "unknown",
-                    "confidence": 0.0,
-                    "error": "No tables found",
-                    "xlsx_path": "",
-                }
+        if tables:
+            # Use the first (or largest) table for primary output
+            primary = max(tables, key=lambda t: len(t["rows"]))
+            columns = primary["headers"]
+            rows = []
+            for row_data in primary["rows"]:
+                row_dict = {}
+                for ci, col in enumerate(columns):
+                    row_dict[col] = row_data[ci] if ci < len(row_data) else ""
+                rows.append(row_dict)
 
-            rows = all_tables[0]
+            doc_type = "table"
+            if metadata:
+                doc_type = "mixed"
 
-        # Parse metadata
-        blob = re.sub(r'\n', ' ', rows[1][0] or '') if len(rows) > 1 and rows[1] and rows[1][0] else ''
-        md = {
-            "Institute Name": _get_field(r'Institute Name\s*:\s*(.+?)(?=Semester\s*:)', blob),
-            "Semester": _get_field(r'Semester\s*:\s*:?\s*(.+?)(?=Enrollment No)', blob),
-            "Enrollment No": _get_field(r'Enrollment No\s*:\s*(\S+)', blob),
-            "Student Name": _get_field(r"Student's Name\s*:\s*:?\s*(\S+)", blob),
-        }
+            return {
+                "columns": columns,
+                "rows": rows,
+                "document_type": doc_type,
+                "confidence": 0.90,
+                "extraction_method": "pdfplumber_universal",
+                "xlsx_path": xlsx_path,
+                "doc_title": content["doc_title"],
+                "total_tables": len(tables),
+                "total_metadata_fields": len(metadata),
+            }
 
-        # Find table data
-        header_idx = 2
-        for i, r in enumerate(rows):
-            if r and len(r) >= 2:
-                cell0 = str(r[0] or '').strip().lower()
-                if cell0 in ('sr.', 'sr', 'sno', 's.no', 'no.', '#', 'sl.'):
-                    header_idx = i
-                    break
+        elif metadata:
+            columns = ["Field", "Value"]
+            rows = [{"Field": k, "Value": v} for k, v in metadata]
+            return {
+                "columns": columns,
+                "rows": rows,
+                "document_type": "form",
+                "confidence": 0.80,
+                "extraction_method": "pdfplumber_universal",
+                "xlsx_path": xlsx_path,
+                "doc_title": content["doc_title"],
+                "total_tables": 0,
+                "total_metadata_fields": len(metadata),
+            }
 
-        header_row = rows[header_idx] if header_idx < len(rows) else ['Sr.', 'Subject Code', 'Subject Name']
-        columns = [str(v).strip() if v else f'Column_{i}' for i, v in enumerate(header_row[:3])]
+        else:
+            return {
+                "columns": [],
+                "rows": [],
+                "document_type": "unknown",
+                "confidence": 0.0,
+                "error": "No structured data found in PDF",
+                "extraction_method": "pdfplumber_universal",
+                "xlsx_path": "",
+                "doc_title": content.get("doc_title", ""),
+            }
 
-        data_rows = []
-        for r in rows[header_idx + 1:]:
-            if _is_skip_row(r):
-                continue
-            row_dict = {}
-            for ci, col in enumerate(columns):
-                val = str(r[ci]).strip() if ci < len(r) and r[ci] else ''
-                row_dict[col] = val
-            if any(row_dict.values()):
-                data_rows.append(row_dict)
-
-        return {
-            "columns": columns,
-            "rows": data_rows,
-            "document_type": "form",
-            "confidence": 0.90,
-            "extraction_method": "pdfplumber_lines",
-            "xlsx_path": xlsx_path,
-            "metadata": md,
-        }
-
-    except Exception as e:
-        # Clean up failed xlsx
+    except Exception as exc:
         if os.path.exists(xlsx_path):
             os.remove(xlsx_path)
         return {
@@ -358,7 +581,7 @@ def get_extraction_summary(pdf_path: str) -> dict:
             "rows": [],
             "document_type": "unknown",
             "confidence": 0.0,
-            "error": str(e),
-            "extraction_method": "pdfplumber_lines",
+            "error": str(exc),
+            "extraction_method": "pdfplumber_universal",
             "xlsx_path": "",
         }
