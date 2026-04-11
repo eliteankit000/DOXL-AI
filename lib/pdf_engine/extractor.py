@@ -173,6 +173,27 @@ def _looks_like_data_row(row: list, known_headers: list) -> bool:
     return False
 
 
+def _is_column_header_line(line: str,
+                           all_table_headers: list) -> bool:
+    """
+    Returns True if this line is actually a column header row
+    that pdfplumber read as raw text before the table.
+    Prevents column header text from being used as doc title.
+    """
+    line_words = set(re.findall(r'[A-Z]{2,}', line.upper()))
+    if len(line_words) < 3:
+        return False
+    for headers in all_table_headers:
+        header_words = set()
+        for h in headers:
+            header_words.update(re.findall(r'[A-Z]{2,}',
+                                           str(h).upper()))
+        overlap = line_words & header_words
+        if len(overlap) >= 3:
+            return True
+    return False
+
+
 def extract_pdf_content(pdf_path: str) -> dict:
     """
     Extract all content from a PDF into a structured dict.
@@ -214,45 +235,26 @@ def extract_pdf_content(pdf_path: str) -> dict:
             lines = [ln.strip() for ln in raw_text.split("\n")
                      if ln.strip()]
 
-            # ── Document title from page 1 ──────────────────────
-            if page_num == 0 and lines:
-                # Collect up to 3 candidate title lines
-                candidates = []
-                for line in lines:
-                    if (len(line) > 8
-                            and not re.match(
-                                r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}",
-                                line)
-                            and not re.match(r"^\d+$", line)
-                            and not re.match(r"^\d{1,2}:\d{2}", line)):
-                        candidates.append(line)
-                    if len(candidates) == 3:
-                        break
-
-                if candidates:
-                    # Pick the LONGEST candidate as the title
-                    doc_title = max(candidates, key=len)
-                    # No subtitle — set empty to avoid double title rows
-                    doc_subtitle = ""
-
             # ── Try geometric table extraction ──────────────────
             tables_geo = page.extract_tables({
                 "vertical_strategy":   "lines",
                 "horizontal_strategy": "lines",
                 "snap_tolerance":      3,
-            }) or []
+                "join_tolerance":      3,
+                "edge_min_length":     3,
+            })
 
-            # ── Fallback to text-alignment strategy ─────────────
-            tables_txt = []
-            if not tables_geo:
-                tables_txt = page.extract_tables({
+            # ── Fallback to text-alignment ONLY if geometric
+            #    found nothing ────────────────────────────────────
+            if tables_geo:
+                page_tables = tables_geo
+            else:
+                page_tables = page.extract_tables({
                     "vertical_strategy":   "text",
                     "horizontal_strategy": "text",
                     "snap_tolerance":      5,
                     "min_words_vertical":  1,
                 }) or []
-
-            page_tables = tables_geo or tables_txt
 
             # ── Process each table on this page ─────────────────
             for table in page_tables:
@@ -318,8 +320,47 @@ def extract_pdf_content(pdf_path: str) -> dict:
                         "page_start": page_num + 1,
                     })
 
+            # ── Document title from page 1 (AFTER tables) ────────
+            # Title must come from lines BEFORE the table, and must
+            # NOT be a column header line from any extracted table.
+            if page_num == 0:
+                page_header_lists = []
+                for t in (all_tables or []):
+                    page_header_lists.append(t["headers"])
+
+                title_candidates = []
+                for line in lines:
+                    line = line.strip()
+                    if len(line) <= 8:
+                        continue
+                    if re.match(r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}",
+                                line):
+                        continue
+                    if re.match(r"^\d+$", line):
+                        continue
+                    if re.match(r"^\d{1,2}:\d{2}", line):
+                        continue
+                    if re.match(r"\d{1,2}/\d{1,2}/\d{4}\s+\d",
+                                line):
+                        continue
+                    if "http" in line.lower():
+                        continue
+                    if _is_column_header_line(line,
+                                             page_header_lists):
+                        continue
+                    title_candidates.append(line)
+                    if len(title_candidates) == 3:
+                        break
+
+                if title_candidates:
+                    doc_title = max(title_candidates, key=len)
+                else:
+                    doc_title = "Document"
+
+                doc_subtitle = ""
+
             # ── Extract key-value metadata ───────────────────────
-            # Only run if page has no tables or has a form-like structure
+            # Only run if page has NO tables (form-type pages)
             if not page_tables:
                 for line in lines:
                     # Match patterns: "Key : Value" or "Key    Value"
@@ -426,9 +467,15 @@ def build_excel(content: dict, output_path: str) -> str:
         current_row += 1
 
         # ── Data rows with alternating colors ─────────────────
+        # Track column widths inline (single pass, no separate loop)
+        col_widths = [len(str(h)) for h in headers]
+
         for ri, row in enumerate(rows):
             bg = S_ALT1_BG if ri % 2 == 0 else S_ALT2_BG
             for ci, val in enumerate(row, 1):
+                # Update width tracker in same loop
+                col_widths[ci-1] = max(
+                    col_widths[ci-1], len(str(val)) if val else 0)
                 # Right-align numeric values
                 is_num = bool(re.match(
                     r"^\s*[\d,]+\.?\d*\s*(ML|ml|L|BEER|BOTTEL)?\s*$",
@@ -457,13 +504,11 @@ def build_excel(content: dict, output_path: str) -> str:
         ws.row_dimensions[current_row].height = 20
         current_row += 1
 
-        # ── Column widths from actual content ─────────────────
-        for ci, header in enumerate(headers, 1):
-            col_vals = [row[ci-1] for row in rows
-                        if ci <= len(row)]
+        # ── Apply column widths (computed inline above) ────────
+        for ci, w in enumerate(col_widths, 1):
             ws.column_dimensions[
                 get_column_letter(ci)
-            ].width = _col_width(col_vals, header)
+            ].width = min(max(w + 4, 10), 60)
 
     # ── B: Write metadata/key-value pairs if present ─────────
     if content["metadata_pairs"]:
