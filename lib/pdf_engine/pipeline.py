@@ -136,7 +136,7 @@ def process(pdf_path: str) -> Dict[str, Any]:
     # ── STRATEGY 4: Raw text dump ────────────────────────────
     if full_text.strip():
         # Build a single-column DataFrame from lines
-        lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+        lines = [line.strip() for line in full_text.splitlines() if line.strip()]
         if lines:
             df = pd.DataFrame({"Content": lines})
             result["tables"] = [df]

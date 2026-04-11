@@ -44,7 +44,6 @@ def main():
         tables = result.get("tables", [])
         metadata = result.get("metadata", {})
         source = result.get("source", "unreadable")
-        success = result.get("success", False)
 
         print(f"[DEBUG] Pipeline source: {source}", file=sys.stderr)
         print(f"[DEBUG] Tables: {len(tables)}", file=sys.stderr)
