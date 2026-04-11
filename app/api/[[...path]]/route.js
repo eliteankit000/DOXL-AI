@@ -956,6 +956,11 @@ async function handleProcess(request) {
         structuredJson.blocks = result.blocks;
         console.log(`[handleProcess] 📐 Layout blocks: ${result.blocks.length} sections`);
       }
+      // Store xlsx_path from Python extractor (direct Excel generation)
+      if (result.xlsx_path) {
+        structuredJson.xlsx_path = result.xlsx_path;
+        console.log(`[handleProcess] 📄 Pre-generated xlsx: ${result.xlsx_path}`);
+      }
 
       const { data: resultRecord, error: resultErr } = await supabase
         .from('results')
@@ -1296,6 +1301,40 @@ async function handleExportExcel(request, id) {
     if (!resultData) return jsonResponse({ error: 'Result not found' }, 404);
     if (resultData.uploads.user_id !== user.id) return jsonResponse({ error: 'Not authorized' }, 403);
 
+    // ═══════════════════════════════════════════════════════════════════
+    // CHECK FOR PRE-GENERATED XLSX (from Python extractor)
+    // ═══════════════════════════════════════════════════════════════════
+    const xlsxPath = resultData.structured_json?.xlsx_path
+      || resultData.edited_json?.xlsx_path
+      || null;
+
+    if (xlsxPath) {
+      try {
+        const { readFile: readFileFs } = await import('fs/promises');
+        const { existsSync } = await import('fs');
+        if (existsSync(xlsxPath)) {
+          const xlsxBuffer = await readFileFs(xlsxPath);
+          const fileName = resultData.uploads.file_name?.replace(/\.[^.]+$/, '') || 'docxl_export';
+          console.log(`[handleExportExcel] Serving pre-generated xlsx: ${xlsxPath} (${xlsxBuffer.length} bytes)`);
+          return new NextResponse(xlsxBuffer, {
+            status: 200,
+            headers: {
+              ...corsHeaders(),
+              'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              'Content-Disposition': `attachment; filename="${fileName}.xlsx"`,
+            },
+          });
+        } else {
+          console.log(`[handleExportExcel] Pre-generated xlsx not found at ${xlsxPath}, falling back to ExcelJS`);
+        }
+      } catch (xlsxErr) {
+        console.error(`[handleExportExcel] Error reading pre-generated xlsx: ${xlsxErr.message}`);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // FALLBACK: Generate Excel using ExcelJS
+    // ═══════════════════════════════════════════════════════════════════
     const ExcelJS = (await import('exceljs')).default;
     const workbook = new ExcelJS.Workbook();
 
