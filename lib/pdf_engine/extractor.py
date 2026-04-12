@@ -1,3 +1,4 @@
+import tempfile
 import re
 import os
 import uuid
@@ -979,7 +980,7 @@ def get_extraction_summary(pdf_path: str) -> dict:
     Extract PDF, generate xlsx, and return a JSON-friendly summary.
     Called by scripts/extract.py which outputs JSON to stdout.
     """
-    output_dir = "/app/outputs"
+    output_dir = os.path.join(tempfile.gettempdir(), "love2excel_outputs")
     os.makedirs(output_dir, exist_ok=True)
     xlsx_id = str(uuid.uuid4())
     xlsx_path = os.path.join(output_dir, "{}.xlsx".format(xlsx_id))
