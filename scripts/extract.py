@@ -31,7 +31,8 @@ def main():
     start_time = time.time()
 
     try:
-        sys.path.insert(0, '/app')
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, project_root)
         from lib.pdf_engine.extractor import get_extraction_summary
 
         result = get_extraction_summary(file_path)
